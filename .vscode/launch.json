@@ -7,7 +7,7 @@
             "name": "Debug BIOS in QEMU",
             "type": "cppdbg",
             "request": "launch",
-            "program": "hello.bin.dbg",
+            "program": "bios.bin.elf",
             "miDebuggerServerAddress": "localhost:1234",
             "miDebuggerPath": "/opt/homebrew/bin/gdb",
             "cwd": "${workspaceFolder}/bios",

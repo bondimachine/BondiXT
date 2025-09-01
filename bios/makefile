@@ -1,17 +1,23 @@
 # makefile.mak
 
-ASM = hello.asm
-BIN = hello.bin
+ASM = bios.asm
+BIN = bios.bin
 NASM_FLAGS = -O0
 
-all: $(BIN) $(BIN).dbg
+all: $(BIN) $(BIN).elf
 
-$(BIN): $(ASM)
+$(BIN): $(ASM) serial.asm video_serial.asm config.serial.inc
 	nasm $(NASM_FLAGS) -f bin -o $(BIN) $(ASM)
 
-$(BIN).dbg: $(ASM)
-	nasm $(NASM_FLAGS) -f elf32 -g -o $(BIN).dbg $(ASM)
+$(BIN).elf: $(BIN)
+	nasm $(NASM_FLAGS) -f elf32 -g -o $(BIN).elf $(ASM)
 
 
 clean:
 	rm -f $(BIN)
+
+run: $(BIN)
+	qemu-system-i386 -bios $(BIN) -serial stdio
+
+debug: $(BIN).elf
+	qemu-system-i386 -bios $(BIN) -serial stdio	-s -S
