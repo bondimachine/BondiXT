@@ -9,5 +9,3 @@ int10_handler:
 .done:
     popa
     iret
-
-estoy    db "Estoy!", 13, 10, 13, 10, 0

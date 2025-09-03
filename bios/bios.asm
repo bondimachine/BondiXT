@@ -8,8 +8,14 @@ _start:
 
     xor ax, ax
     mov es, ax            ; ES = 0
+
     mov si, 0x40
     mov word [es:si], int10_handler
+    add si, 2
+    mov word [es:si], cs
+
+    mov si, 0x58
+    mov word [es:si], int16_handler
     add si, 2
     mov word [es:si], cs
 
@@ -43,6 +49,7 @@ _start:
 
 %include "serial.asm"
 %include "video_serial.asm"
+%include "keyboard_serial.asm"
 
 welcome_message    db "Welcome to BondiXT!", 13, 10, 13, 10, 0
 boot_message    db "Booting from embedded disk image...", 13, 10, 13, 10, 0

@@ -6,7 +6,7 @@ NASM_FLAGS = -O0
 
 all: $(BIN) $(BIN).elf
 
-$(BIN): $(ASM) serial.asm video_serial.asm config.serial.inc
+$(BIN): $(ASM) serial.asm video_serial.asm keyboard_serial.asm config.serial.inc
 	nasm $(NASM_FLAGS) -f bin -o $(BIN) $(ASM)
 
 $(BIN).elf: $(BIN)
