@@ -27,8 +27,29 @@ start:
 
     jmp start
 
-%include "../../bios/config.serial.inc"
-%include "../../bios/serial.asm"
+; ---------------------
+; Functions using INT 14h
+; ---------------------
+
+serial_init:
+    mov ah, 0x00      ; Function 00h: Initialize port
+    mov al, 0xE3      ; 9600 baud, 8-N-1
+    mov dx, 0         ; COM1
+    int 0x14
+    ret
+
+serial_putc:
+    mov ah, 0x01      ; Function 01h: Send character
+    mov dx, 0         ; COM1
+    int 0x14
+    ret
+
+serial_getc:
+    mov ah, 0x02      ; Function 02h: Receive character
+    mov dx, 0         ; COM1
+    int 0x14          ; Character in AL
+    ret
+
 %include "../../bios/serial_util.asm"
 
 ; ---------------------

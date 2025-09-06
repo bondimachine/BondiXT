@@ -18,6 +18,11 @@ _start:
     add si, 2
     mov word [es:si], cs
 
+    mov si, 0x50
+    mov word [es:si], int14_handler
+    add si, 2
+    mov word [es:si], cs
+
     mov si, 0x58
     mov word [es:si], int16_handler
     add si, 2
@@ -57,6 +62,7 @@ _start:
 
 
 %include "serial.asm"
+%include "serial_util.asm"
 %include "video_serial.asm"
 %include "keyboard_serial.asm"
 %include "disk_embedded.asm"
