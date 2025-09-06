@@ -18,6 +18,21 @@ _start:
     add si, 2
     mov word [es:si], cs
 
+    mov si, 0x44
+    mov word [es:si], int11_handler
+    add si, 2
+    mov word [es:si], cs
+
+    mov si, 0x48
+    mov word [es:si], int12_handler
+    add si, 2
+    mov word [es:si], cs
+
+    mov si, 0x4c
+    mov word [es:si], int13_handler
+    add si, 2
+    mov word [es:si], cs
+
     mov si, 0x50
     mov word [es:si], int14_handler
     add si, 2
@@ -66,6 +81,19 @@ _start:
 %include "video_serial.asm"
 %include "keyboard_serial.asm"
 %include "disk_embedded.asm"
+
+
+int11_handler:
+    ; 1 floppy 
+    ; 80x25 mono
+    ; 1 rs232 port
+    mov ax, 0x231
+    iret
+
+int12_handler:
+    mov ax, 1024 ; 1MB
+    iret
+
 
 welcome_message    db "Welcome to BondiXT!", 13, 10, 13, 10, 0
 boot_message    db "Booting from embedded disk image...", 13, 10, 13, 10, 0
