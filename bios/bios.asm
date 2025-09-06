@@ -1,6 +1,10 @@
 %include "config.serial.inc"
 BITS 16
 
+DISK_IMAGE_SEGMENT equ 0xE000 ; 0xE0000 / 16
+
+times 0xF000 - ($ - $$) db 0 ; BIOS code starts at 0xF000 
+
 _start:
     cli                   ; disable interrupts during setup
     push cs
@@ -27,15 +31,20 @@ _start:
     call serial_print_string
 
     ; Copy disk image to boot sector (0x7C00)
-    mov si, diskimg
+    mov ax, DISK_IMAGE_SEGMENT
+    mov ds, ax            ; DS = DISK_IMAGE
+    mov si, 0
     mov di, 0x7C00
-    mov cx, DISK_IMAGE_SIZE
+    mov cx, 512
 .copy_loop:
-    mov al, [si]
+    mov al, [ds:si]
     mov [es:di], al
     inc si
     inc di
     loop .copy_loop
+
+    push cs
+    pop ds
 
     mov si, boot_message
     call serial_print_string
@@ -50,15 +59,10 @@ _start:
 %include "serial.asm"
 %include "video_serial.asm"
 %include "keyboard_serial.asm"
+%include "disk_embedded.asm"
 
 welcome_message    db "Welcome to BondiXT!", 13, 10, 13, 10, 0
 boot_message    db "Booting from embedded disk image...", 13, 10, 13, 10, 0
-
-diskimg:
-    ; you can use consoleboot.bin for example from tests/console
-    incbin "disk.bin"
-
-DISK_IMAGE_SIZE equ $ - diskimg
 
 reset_vector:
     times 0xFFF0 - ($ - $$) db 0
