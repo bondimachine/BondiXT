@@ -6,7 +6,7 @@ NASM_FLAGS = -O0
 
 all: $(BIN) $(BIN).elf
 
-rom: $(BIN)
+rom: $(BIN) disk.bin
 	# Bottom 4kb
 	dd if=$(BIN) of=$(BIN).truncated bs=1 skip=61440 
 	cp disk.bin disk.bin.truncated
@@ -17,7 +17,7 @@ rom: $(BIN)
 $(BIN): $(ASM) serial.asm video_serial.asm keyboard_serial.asm disk_embedded.asm config.serial.inc
 	nasm $(NASM_FLAGS) -f bin -o $(BIN) $(ASM)
 
-$(BIN).elf: $(BIN)
+$(BIN).elf: rom
 	nasm $(NASM_FLAGS) -f elf32 -g -o $(BIN).elf $(ASM)
 
 

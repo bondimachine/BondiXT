@@ -8,19 +8,19 @@ int14_handler:
     cmp dx, 0
     jne .unsupported_port
 
-    ; Jump based on AH
-    mov bl, ah
-    cmp bl, 3
-    ja .unsupported_func
+    cmp ah, 0
+    je .init_port
 
-    shl bx, 1
-    jmp word [.jumptable + bx]
+    cmp ah, 1
+    je .send_char
 
-.jumptable:
-    dw .init_port       ; AH = 00h
-    dw .send_char       ; AH = 01h
-    dw .receive_char    ; AH = 02h
-    dw .get_status      ; AH = 03h
+    cmp ah, 2
+    je .receive_char
+
+    cmp ah, 3
+    je .get_status
+
+    jmp .unsupported_func
 
 .init_port: ; AH = 00h
     call serial_init
