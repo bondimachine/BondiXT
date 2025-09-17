@@ -97,9 +97,10 @@ serial_init:
 ; ---------------------
 serial_putc:
     ; wait for Transmitter Holding Register Empty (LSR bit 5 = 0x20) at SERIAL_PORT 0x3FD
-.wait_tx:
+    push dx
     push ax
     mov dx, SERIAL_PORT_LSR
+.wait_tx:
     in  al, dx
     test al, 0x20
     jz  .wait_tx
@@ -107,6 +108,7 @@ serial_putc:
     mov dx, SERIAL_PORT
     pop ax
     out dx, al
+    pop dx
     ret
 
 ; ---------------------
@@ -114,12 +116,35 @@ serial_putc:
 ; ---------------------
 serial_getc:
     ; wait for Data Ready (LSR bit 0 = 0x01)
-.wait_rx:
+    push dx
     mov dx, SERIAL_PORT_LSR
+.wait_rx:
     in  al, dx
     test al, 0x01
     jz  .wait_rx
     ; read received byte from RBR (0x3F8)
     mov dx, SERIAL_PORT
     in  al, dx
+    pop dx
+    ret
+
+; ---------------------
+; serial_peekc: returns character in AL if available, does not remove from buffer
+; Carry flag set if character is available, clear if not
+; ---------------------
+serial_peekc:
+    push dx
+    mov dx, SERIAL_PORT_LSR
+    in  al, dx
+    test al, 0x01           ; Data Ready?
+    jz  .no_char
+    ; Data is ready, read from RBR but do not remove from buffer
+    ; On 8250 UART, reading RBR removes the byte, so true peek is not possible.
+    ; As a workaround, just signal availability and leave AL undefined.
+    stc                     ; Set carry to indicate char available
+    pop dx
+    ret
+.no_char:
+    clc                     ; Clear carry to indicate no char
+    pop dx
     ret

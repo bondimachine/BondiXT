@@ -38,8 +38,23 @@ _start:
     add si, 2
     mov word [es:si], cs
 
+    mov si, 0x54
+    mov word [es:si], int15_handler
+    add si, 2
+    mov word [es:si], cs
+
     mov si, 0x58
     mov word [es:si], int16_handler
+    add si, 2
+    mov word [es:si], cs
+
+    mov si, 0x5c
+    mov word [es:si], int17_handler
+    add si, 2
+    mov word [es:si], cs
+
+    mov si, 0x68
+    mov word [es:si], int1Ah_handler
     add si, 2
     mov word [es:si], cs
 
@@ -50,18 +65,16 @@ _start:
     mov si, welcome_message
     call serial_print_string
 
-    ; Copy disk image to boot sector (0x7C00)
-    mov ax, DISK_IMAGE_SEGMENT
-    mov ds, ax            ; DS = DISK_IMAGE
-    mov si, 0
-    mov di, 0x7C00
-    mov cx, 512
-.copy_loop:
-    mov al, [ds:si]
-    mov [es:di], al
-    inc si
-    inc di
-    loop .copy_loop
+    mov ax, 0
+    mov es, ax
+
+    ; copy the boot sector to 0x7C00
+    mov ah, 02h
+    mov al, 1 ; copy 1 sector
+    mov cx, 1 ; from cylinder 0 sector 1 (sector 1 based)
+    mov dx, 0 ; head 0 drive 0
+    mov bx, 0x7C00
+    int 13h
 
     push cs
     pop ds
@@ -91,9 +104,19 @@ int11_handler:
     iret
 
 int12_handler:
-    mov ax, 1024 ; 1MB
+    mov ax, 640 ; conventional memory is 640kb
     iret
 
+int15_handler:
+    stc
+    iret
+
+int17_handler:
+    mov ah, 0
+    iret
+
+int1Ah_handler:
+    iret
 
 welcome_message    db "Welcome to BondiXT!", 13, 10, 13, 10, 0
 boot_message    db "Booting from embedded disk image...", 13, 10, 13, 10, 0

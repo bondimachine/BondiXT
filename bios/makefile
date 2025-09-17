@@ -3,6 +3,7 @@
 ASM = bios.asm
 BIN = bios.bin
 NASM_FLAGS = -O0
+QEMU ?= qemu-system-i386
 
 all: $(BIN) $(BIN).elf
 
@@ -25,7 +26,7 @@ clean:
 	rm -f $(BIN) $(BIN).elf $(BIN).truncated rom.bin
 
 run: rom
-	qemu-system-i386 -bios rom.bin -serial stdio
+	$(QEMU) -bios rom.bin -serial stdio
 
 debug: $(BIN).elf
-	qemu-system-i386 -bios rom.bin -serial stdio -s -S
+	$(QEMU) -bios rom.bin -serial stdio -s -S

@@ -39,7 +39,7 @@ Minimal interrupts we need to support for DOS 3.3 (from DOS source code, need to
     int 14h 01h | serial port transmit char
     int 14h 02h | serial port receive char
     int 14h 03h | serial port status
-    int 15h C0h | set system parameters 
+    int 15h C0h | get system parameters 
     int 15h 41h | wait for external event (PC Convertible) -> Ignore
     int 15h 90h | wait for disk interrupt
     int 16h 00h | keyboard read char
