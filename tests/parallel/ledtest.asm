@@ -1,6 +1,6 @@
 BITS 16
 
-times 0xF000 - ($ - $$) db 0 ; BIOS code starts at 0xF000
+times 0xE000 - ($ - $$) db 0 ; put the code in the last 8kb
 
 _start:
 

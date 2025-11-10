@@ -9,7 +9,9 @@ all: $(BIN) $(BIN).elf
 
 rom: $(BIN)
 	# Bottom 32kb
-	dd if=$(BIN) of=$(BIN).truncated bs=1 skip=32768 
+	dd if=$(BIN) of=$(BIN).truncated bs=1 skip=32768
+	# Bottom 8kb 
+	dd if=$(BIN) of=$(BIN).truncated8k bs=1 skip=57344
 
 $(BIN): $(ASM) ledtest.asm
 	nasm $(NASM_FLAGS) -f bin -o $(BIN) $(ASM)
@@ -19,7 +21,7 @@ $(BIN).elf: rom
 
 
 clean:
-	rm -f $(BIN) $(BIN).elf $(BIN).truncated
+	rm -f $(BIN) $(BIN).elf $(BIN).truncated $(BIN).truncated8k
 
 run: rom
 	$(QEMU) -bios $(BIN) -parallel stdio
