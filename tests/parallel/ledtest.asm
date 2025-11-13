@@ -24,7 +24,7 @@ _continue:
 _wait:
     inc bx; 3
     cmp bx, 0xFFFF; 4
-    jl _wait; 16
+    jb _wait; 16
 
     rol cl, 1
     jmp _continue
