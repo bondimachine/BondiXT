@@ -15,6 +15,12 @@ start:
     cli
     mov bp, 0
     mov es, bp
+    mov ax, cs
+    mov ds, ax
+
+    mov dx, 0x378
+    mov al, 0
+    out dx, al
 
     mov al, 1
     mov si, _phase1
@@ -154,7 +160,8 @@ march_up:
     jmp .outer_loop
 
 .done:
-    jmp sp
+    mov si, sp
+    jmp si
 
 
 march_down:
@@ -193,7 +200,8 @@ march_down:
     jmp .outer_loop
 
 .done:
-    jmp sp
+    mov si, sp
+    jmp si
 
 %ifdef QEMU
 ; prints lower 4 bits of al
@@ -207,8 +215,12 @@ print_nibble:
     add al, '0'
     jmp print
 
-print_blink:
+print_blink0:
     mov al, '_'
+    jmp print
+
+print_blink1:
+    mov al, '|'
     jmp print
 
 print_error:
@@ -225,8 +237,12 @@ print_nibble_error:
 print_nibble:
     jmp print
 
-print_blink:
-    mov al, 0
+print_blink0:
+    mov al, P0
+    jmp print
+
+print_blink1:
+    mov al, P1
     jmp print
 
 print_error:
@@ -234,7 +250,7 @@ print_error:
     jmp print
 
 print_success:
-    mov al, 0xFF
+    mov al, 0b11000011
     jmp print
 
 %endif
@@ -282,18 +298,25 @@ print:
 print_phase:
     mov sp, si
 %ifndef QEMU
-    mov cl, al 
+    sub al, 1
+    mov cl, al
     mov al, 1
     rol al, cl
     or al, 0x80
 %endif
     mov bl, al
     mov si, .blink0
-    jmp print_blink
+    jmp print_blink0
 .blink0:
     mov si, .wait0
     jmp _wait
 .wait0:
+    mov si, .blink0_1
+    jmp print_blink1
+.blink0_1:
+    mov si, .wait0_1
+    jmp _wait
+.wait0_1:
     mov al, bl
     mov si, .blink1
     jmp print_nibble
@@ -302,7 +325,7 @@ print_phase:
     jmp _wait
 .wait1:    
     mov si, .blink2
-    jmp print_blink
+    jmp print_blink1
 .blink2:
     mov si, .wait2
     jmp _wait
@@ -315,12 +338,13 @@ print_phase:
     jmp _wait
 .wait3:    
     mov si, .blink4
-    jmp print_blink
+    jmp print_blink0
 .blink4:
     mov si, .wait4
     jmp _wait
 .wait4:
-    jmp sp
+    mov si, sp
+    jmp si
 
 
 _wait:
@@ -328,6 +352,7 @@ _wait:
 .loop:    
     dec cx
     jnz .loop
+
     jmp si
 
 error:
