@@ -1,0 +1,86 @@
+.program bus
+
+; Bus Interface for RP2350
+; Implements a write-only interface (ignoring reads for now)
+;
+; Protocol:
+; 1. Wait for !CS (Chip Select)
+; 2. Read 16-bit Address (D0-D15)
+; 3. Wait for !WR (Write Strobe)
+; 4. Read 8-bit Data (D0-D7)
+; 5. Push Address and Data to FIFO for DMA
+;
+; Pin Mapping Assumption:
+; - IN pins base is mapped to D0
+; - CS is at IN base + 16
+; - WR is at IN base + 17
+; (Adjust the wait instruction indices if your hardware differs)
+
+.wrap_target
+start:
+    ; 1. Wait for !CS
+    wait 0 pin 16        ; Wait for CS (pin 16 relative to IN base) to be Low
+
+    ; 2. Save D0-D15 in addr register (ISR)
+    in pins, 16          ; Shift 16 bits from pins into ISR
+
+    ; 3. Wait for !WR or CS high
+    ; We poll CS and WR. If CS goes high, we abort.
+wait_wr:
+    mov osr, pins        ; Read all pins into OSR
+    out null, 16         ; Discard D0-D15
+    out y, 1             ; Get CS (bit 16)
+    jmp y-- abort        ; If CS is high, abort
+    out y, 1             ; Get WR (bit 17)
+    jmp !y read_data     ; If WR is low, proceed
+    jmp wait_wr          ; Else keep waiting
+
+abort:
+    mov isr, null        ; Clear ISR (discard partial address)
+    jmp start            ; Restart
+
+read_data:
+    ; 4. Save D0-D7 to data register (ISR)
+    in pins, 8           ; Shift 8 bits from pins into ISR
+                         ; ISR now contains [Address (16) << 8| Data (8)]
+
+    ; 5. DMA write (Push to FIFO)
+    push block           ; Push ISR to RX FIFO. Clears ISR.
+
+    ; Wait for CS to go high to complete the cycle
+    wait 1 pin 16
+.wrap
+
+% c-sdk {
+static inline void bus_program_init(PIO pio, uint sm, uint offset, uint base_pin) {
+    pio_sm_config c = bus_program_get_default_config(offset);
+
+    // Map the state machine's IN pin group to D0..D15 (and CS/WR if contiguous)
+    // We need at least 18 pins (0-17) for the 'wait pin' instructions to work as written.
+    sm_config_set_in_pins(&c, base_pin);
+
+    // Set this pin's GPIO function (connect PIO to the pad)
+    // Initialize all 18 pins (D0-D15, CS, WR)
+    for (uint i = 0; i < 18; i++) {
+        pio_gpio_init(pio, base_pin + i);
+    }
+    
+    // Set the pin direction to input at the PIO
+    pio_sm_set_consecutive_pindirs(pio, sm, base_pin, 18, false);
+
+    // Shift configuration right and pushing manually
+    sm_config_set_in_shift(&c, true, false, 32);
+    
+    // Set OSR shift direction to Right for the 'out' instructions in the polling loop
+    sm_config_set_out_shift(&c, true, false, 32);
+
+    // Join the TX and RX FIFOs into a single 8-word RX FIFO
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+
+    // Load our configuration, and jump to the start of the program
+    pio_sm_init(pio, sm, offset, &c);
+    
+    // Enable the state machine
+    pio_sm_set_enabled(pio, sm, true);
+}
+%}
