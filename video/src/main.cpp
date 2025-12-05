@@ -187,6 +187,7 @@ const uint8_t CGA_PALETTE4_1[4] = {BLACK, CYAN, MAGENTA,
                                   WHITE}; // Cyan, Magenta, White
 
 
+#include "vga_palette.h"
 
 // Current palette selection (0 or 1)
 uint8_t current_palette_idx = 1;
@@ -327,6 +328,32 @@ void demo(int color) {
   }
 }
 
+// void vga_palette() {
+//   int x = 0; // VGA x coordinate
+//   int y = 0; // VGA y coordinate
+
+//   // A couple of counters
+//   int xcounter = 0;
+//   int ycounter = 0;
+//   int color_low = 0;
+//   int color_high = 0;
+
+//   for (y = 0; y < 480; y++) {  // For each y-coordinate . . .
+//     if (ycounter == 30) {      //   If the y-counter is 60 . . .
+//       ycounter = 0;            //     Zero the counter
+//       color_high = (color_high + 1) % 16; //     Increment the color index
+//     } //
+//     ycounter += 1;               //   Increment the y-counter
+//     for (x = 0; x < 640; x++) {  //   For each x-coordinate . . .
+//       if (xcounter == 40) {      //     If the x-counter is 80 . . .
+//         xcounter = 0;            //        Zero the x-counter
+//         color_low = (color_low + 1) % 16; //        Increment the color index
+//       } //
+//       xcounter += 1;                  //     Increment the x-counter
+//       drawPixel(x, y, vga_palette_6bit[color_high << 4 | color_low]); //     Draw a pixel to the screen
+//     }
+//   }
+// }
 
 // void fullcolor(uint8_t color) {
 //     for (int y = 0; y < 480; y++) {  // For each y-coordinate . . .
