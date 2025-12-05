@@ -11,25 +11,27 @@
 /*
  * HARDWARE CONNECTIONS
  *  - GPIO 0-7 --> AD0-AD7
- *  - GPIO 8-15 -> A8-A15
- *  - GPIO 16 ---> CS
- *  - GPIO 17 ---> WR
- *  - GPIO 18 ---> VGA Hsync
- *  - GPIO 19 ---> VGA Vsync
- *  - GPIO 20 ---> 330 ohm resistor ---> VGA Red
- *  - GPIO 21 ---> 330 ohm resistor ---> VGA Green
+ *  - GPIO 8-16 -> A8-A16
+ *  - GPIO 17 ---> 1k ohm resistor ---> VGA Red
+ *  - GPIO 18 ---> 330 ohm resistor ---> VGA Red
+ *  - GPIO 19 ---> 1k ohm resistor ---> VGA Green
+ *  - GPIO 20 ---> 330 ohm resistor ---> VGA Green
+ *  - GPIO 21 ---> 1k ohm resistor ---> VGA Blue
  *  - GPIO 22 ---> 330 ohm resistor ---> VGA Blue
+ *  - GPIO 26 ---> VGA Hsync
+ *  - GPIO 27 ---> VGA Vsync
+ *  - GPIO 28 ---> /CS & /CLK
  *  - RP2040 GND ---> VGA GND
  */
 
 // VGA timing constants
 #define H_ACTIVE 655   // (active + frontporch - 1) - one cycle delay for mov
 #define V_ACTIVE 479   // (active - 1)
-#define RGB_ACTIVE 319 // (horizontal active)/2 - 1
-// #define RGB_ACTIVE 639 // change to this if 1 pixel/byte
+// #define RGB_ACTIVE 319 // (horizontal active)/2 - 1
+#define RGB_ACTIVE 639 // change to this if 1 pixel/byte
 
 // Length of the pixel array, and number of DMA transfers
-#define TXCOUNT 153600 // Total pixels/2 (since we have 2 pixels per byte)
+#define TXCOUNT 307200 // Total pixels (I could optimize this for 222 but oh well)
 
 // Pixel color array that is DMA's to the PIO machines and
 // a pointer to the ADDRESS of this color array.
@@ -39,20 +41,18 @@ unsigned char *address_pointer = &vga_data_array[0];
 
 // Pin Definitions
 // Adjust these according to your hardware design
-const uint8_t PIN_BUS_BASE = 0; // D0-D15, CS, WR (18 pins total)
-// D0-D15: 0-15
-// CS: 16
-// WR: 17
+const uint8_t PIN_BUS_BASE = 0; // D0-D16
+const uint8_t PIN_CS = 28;
 
-const uint8_t PIN_VGA_HSYNC = 18;
-const uint8_t PIN_VGA_VSYNC = 19;
-const uint8_t PIN_VGA_RGB_BASE = 20; // R, G, B (3 pins)
+const uint8_t PIN_VGA_HSYNC = 26;
+const uint8_t PIN_VGA_VSYNC = 27;
+const uint8_t PIN_VGA_RGB_BASE = 17; // R, R+, G, G+, B, B+ (6 pins)
 
 // Global PIO variables for Bus Interface
 PIO pio_bus = pio0;
 int sm_bus = -1;
 
-void demo();
+void demo(int color);
 
 void setup() {
   Serial.begin(115200);
@@ -154,25 +154,39 @@ void setup() {
 
   Serial.println("VGA Interface Initialized");
 
-  demo();
+  demo(0);
 }
 
-// We can only produce 8 colors, so let's give them readable names
-#define BLACK 0
-#define RED 1
-#define GREEN 2
-#define YELLOW 3
-#define BLUE 4
-#define MAGENTA 5
-#define CYAN 6
-#define WHITE 7
+// this is BBGGRR copied from CGA palette (ish)
+#define BLACK 0b00000000
+#define BLUE 0b00100000
+#define GREEN 0b00001000
+#define CYAN 0b001010000
+#define RED 0b00000010
+#define MAGENTA 0b00110011
+#define BROWN 0b00011111
+#define LIGHT_GRAY 0b00101010
+#define DARK_GRAY 0b00010101
+#define LIGHT_BLUE 0b00110101
+#define LIGHT_GREEN 0b00011101
+#define LIGHT_CYAN 0b00111101
+#define LIGHT_RED 0b00010111
+#define LIGHT_MAGENTA 0b00110111
+#define YELLOW 0b00011111
+#define WHITE 0b00111111
+
+const uint8_t CGA_PALETTE16[16] = {BLACK, BLUE, GREEN, CYAN, RED, MAGENTA, BROWN, LIGHT_GRAY, 
+  DARK_GRAY, LIGHT_BLUE, LIGHT_GREEN, LIGHT_CYAN, LIGHT_RED, LIGHT_MAGENTA, YELLOW, WHITE};
+
 
 // CGA Palette Definitions
 // We only have 8 colors, so we map CGA colors to the closest available
-const uint8_t CGA_PALETTE_0[4] = {BLACK, GREEN, RED,
+const uint8_t CGA_PALETTE4_0[4] = {BLACK, GREEN, RED,
                                   YELLOW}; // Green, Red, Brown
-const uint8_t CGA_PALETTE_1[4] = {BLACK, CYAN, MAGENTA,
+const uint8_t CGA_PALETTE4_1[4] = {BLACK, CYAN, MAGENTA,
                                   WHITE}; // Cyan, Magenta, White
+
+
 
 // Current palette selection (0 or 1)
 uint8_t current_palette_idx = 1;
@@ -180,9 +194,9 @@ uint8_t current_palette_idx = 1;
 // Helper to get color from current palette
 uint8_t getCGAColor(uint8_t color_idx) {
   if (current_palette_idx == 0) {
-    return CGA_PALETTE_0[color_idx & 3];
+    return CGA_PALETTE4_0[color_idx & 3];
   } else {
-    return CGA_PALETTE_1[color_idx & 3];
+    return CGA_PALETTE4_1[color_idx & 3];
   }
 }
 
@@ -190,7 +204,7 @@ uint8_t getCGAColor(uint8_t color_idx) {
 // Note that because information is passed to the PIO state machines through
 // a DMA channel, we only need to modify the contents of the array and the
 // pixels will be automatically updated on the screen.
-void drawPixel(int x, int y, char color) {
+void drawPixel(int x, int y, uint8_t color) {
   // Range checks
   if (x > 639)
     x = 639;
@@ -204,14 +218,7 @@ void drawPixel(int x, int y, char color) {
   // Which pixel is it?
   int pixel = ((640 * y) + x);
 
-  // Is this pixel stored in the first 3 bits
-  // of the vga data array index, or the second
-  // 3 bits? Check, then mask.
-  if (pixel & 1) {
-    vga_data_array[pixel >> 1] |= (color << 3);
-  } else {
-    vga_data_array[pixel >> 1] |= (color);
-  }
+  vga_data_array[pixel] = color;
 }
 
 // Update CGA Memory Byte
@@ -271,51 +278,67 @@ void processBus(PIO pio, uint sm) {
     // ISR = [Address (16) << 8 | Data (8)]
 
     uint8_t value = data & 0xFF;
-    uint16_t address = (data >> 8) & 0xFFFF;
+    uint32_t full_address = ((data >> 8) & 0x1FFFF) + 0xA0000;
+    uint16_t address = full_address & 0xFFFF;
 
     Serial.print("Address: ");
     Serial.println(address, HEX);
     Serial.print("Value: ");
     Serial.println(value, HEX);
 
-    // Check if address is within CGA range
-    // Assuming bus sends address relative to 0xB8000 or we just mask it.
-    // Let's assume we handle 0x0000-0x3FFF.
-    if (address < 0x4000) {
+    if (address < 0xB0000) {
+      // TODO: Support mode 10h
+      // MCGA / VGA at A0000 (13h)
+      // Ignore
+    } else if (address < 0xB8000) {
+      // We are mapping B0000 - B7FFF which is Hercules space as I/O
+      // TODO: Support IO addresses at 0x3B0 - 0x3DF (CGA)
+      // TODO: Support IO addresses EGA/VGA at 0x3C0 - 0x3DF?
+    } else {
+      // TODO: Support Text (02h)
+      // TOOD: Support high res mono CGA (06h)?
       updateCGAByte(address, value);
     }
   }
 }
 
-void demo() {
+void demo(int color) {
   int x = 0; // VGA x coordinate
   int y = 0; // VGA y coordinate
-
-  // Array of colors, and a variable that we'll use to index into the array
-  char colors[8] = {BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE};
-  int index = 0;
 
   // A couple of counters
   int xcounter = 0;
   int ycounter = 0;
 
   for (y = 0; y < 480; y++) {  // For each y-coordinate . . .
-    if (ycounter == 60) {      //   If the y-counter is 60 . . .
+    if (ycounter == 8) {      //   If the y-counter is 60 . . .
       ycounter = 0;            //     Zero the counter
-      index = (index + 1) % 8; //     Increment the color index
+      color = (color + 1) % 64; //     Increment the color index
     } //
     ycounter += 1;               //   Increment the y-counter
     for (x = 0; x < 640; x++) {  //   For each x-coordinate . . .
-      if (xcounter == 80) {      //     If the x-counter is 80 . . .
+      if (xcounter == 10) {      //     If the x-counter is 80 . . .
         xcounter = 0;            //        Zero the x-counter
-        index = (index + 1) % 8; //        Increment the color index
+        color = (color + 1) % 64; //        Increment the color index
       } //
       xcounter += 1;                  //     Increment the x-counter
-      drawPixel(x, y, colors[index]); //     Draw a pixel to the screen
+      drawPixel(x, y, color); //     Draw a pixel to the screen
     }
   }
 }
 
+
+// void fullcolor(uint8_t color) {
+//     for (int y = 0; y < 480; y++) {  // For each y-coordinate . . .
+//       for (int x = 0; x < 640; x++) {  //   For each x-coordinate . . .
+//         drawPixel(x, y, color); //     Draw a pixel to the screen
+//       }
+//     }
+// }
+
+int color = 0; 
 void loop() {
-  processBus(pio_bus, sm_bus);
+  // processBus(pio_bus, sm_bus);
+  demo(color);
+  color = (color + 1) % 64;
 }

@@ -4,8 +4,8 @@
 
 // Pin Definitions
 const uint8_t PIN_BUS_BASE = 0; // D0-D15
-const uint8_t PIN_CS = 26; // PI Zero doesn't have 16-25 pins
-const uint8_t PIN_WR = 27;
+const uint8_t PIN_BUS_HIGH = 26; // PI Zero doesn't have 16-25 pins
+const uint8_t PIN_CS = 28; // && CLK 
 
 // AnimatedGIF Object
 AnimatedGIF gif;
@@ -49,34 +49,35 @@ int32_t GIFSeekFile(GIFFILE *pFile, int32_t iPosition) {
 
 
 // Helper to write to bus (Bit-banged)
-void bus_write(uint16_t address, uint8_t data) {
-    // 1. Set Address (Pins 0-15)
-    gpio_put_masked(0xFFFF, address);
-    
-    // 2. Assert CS (Low)
-    // Receiver reads Address immediately after CS goes low
+void bus_write(uint32_t address, uint8_t data) {
+
+    // t1 low
+    gpio_put_masked(0xFFFF, address);    
+    gpio_put(PIN_BUS_HIGH, (address >> 16) & 0x1);
+
+    // t1 high
     gpio_put(PIN_CS, 0);
-    
-
     __asm ("nop; nop; nop; nop; nop; nop; nop; nop; ");
-    
-    // 3. Set Data (Pins 0-7)
-    // This overwrites the lower byte of the address on the bus,
-    // but the receiver should have already sampled the address.
+
+    // t2 low
+    gpio_put(PIN_CS, 1);
+    __asm ("nop; nop; nop; nop; nop; nop; nop; nop; ");
+
     gpio_put_masked(0xFF, data);
-    
-    // 4. Assert WR (Low)
-    // Receiver waits for WR low then reads Data
-    gpio_put(PIN_WR, 0);
-    
-    __asm ("nop; nop; nop; nop; nop; nop; nop; nop; ");
-    
-    // 5. Deassert WR (High)
-    gpio_put(PIN_WR, 1);
-    
+
+    // t2 high
+    gpio_put(PIN_CS, 0);
     __asm ("nop; nop; nop; nop; nop; nop; nop; nop; ");
 
-    // 6. Deassert CS (High)
+    // t3 low
+    gpio_put(PIN_CS, 1);
+    __asm ("nop; nop; nop; nop; nop; nop; nop; nop; ");
+
+    // t3 high
+    gpio_put(PIN_CS, 0);
+    __asm ("nop; nop; nop; nop; nop; nop; nop; nop; ");
+
+    // t4 
     gpio_put(PIN_CS, 1);
 }
 
@@ -121,6 +122,8 @@ void GIFDraw(GIFDRAW *pDraw) {
             address = 0x2000 + (y / 2) * 80 + x_byte;
         }
         
+        address += 0xB8000;
+
         bus_write(address, val);
     }
 }
@@ -136,14 +139,15 @@ void setup() {
         gpio_init(i);
         gpio_set_dir(i, GPIO_OUT);
     }
-    // CS, WR
+
+    // D16
+    gpio_init(PIN_DATA_HIGH);
+    gpio_set_dir(PIN_DATA_HIGH, GPIO_OUT);
+
+    // CS
     gpio_init(PIN_CS);
     gpio_set_dir(PIN_CS, GPIO_OUT);
     gpio_put(PIN_CS, 1); // Default High
-
-    gpio_init(PIN_WR);
-    gpio_set_dir(PIN_WR, GPIO_OUT);
-    gpio_put(PIN_WR, 1); // Default High
     
     Serial.println("Bus Interface Initialized (Bit-banged)");
 
