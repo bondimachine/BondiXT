@@ -1,6 +1,10 @@
 #include <Arduino.h>
 #include <AnimatedGIF.h>
 #include <LittleFS.h>
+#define HALF_CLOCK() __asm ("nop; nop; nop; nop; nop; nop; nop; nop; \
+    nop; nop; nop; nop; nop; nop; nop; nop; \
+    nop; nop; nop; nop; nop; nop; nop; nop; \
+    nop; nop; nop; nop; nop; nop; nop; nop;")
 
 // Pin Definitions
 const uint8_t PIN_BUS_BASE = 0; // D0-D15
@@ -51,38 +55,53 @@ int32_t GIFSeekFile(GIFFILE *pFile, int32_t iPosition) {
 // Helper to write to bus (Bit-banged)
 void bus_write(uint32_t address, uint8_t data) {
 
+    // Serial.print("processMemoryBusMessage(0x");
+    // Serial.print(address, HEX);
+    // Serial.print(", 0x");
+    // Serial.print(data, HEX);
+    // Serial.println(");");
+
     // t1 low
     gpio_put_masked(0xFFFF, address);    
     gpio_put(PIN_BUS_HIGH, (address >> 16) & 0x1);
 
     // t1 high
     gpio_put(PIN_CS, 0);
-    __asm ("nop; nop; nop; nop; nop; nop; nop; nop; ");
+    HALF_CLOCK();
 
     // t2 low
     gpio_put(PIN_CS, 1);
-    __asm ("nop; nop; nop; nop; nop; nop; nop; nop; ");
+    HALF_CLOCK();
 
     gpio_put_masked(0xFF, data);
 
     // t2 high
     gpio_put(PIN_CS, 0);
-    __asm ("nop; nop; nop; nop; nop; nop; nop; nop; ");
+    HALF_CLOCK();
 
     // t3 low
     gpio_put(PIN_CS, 1);
-    __asm ("nop; nop; nop; nop; nop; nop; nop; nop; ");
+    HALF_CLOCK();
 
     // t3 high
     gpio_put(PIN_CS, 0);
-    __asm ("nop; nop; nop; nop; nop; nop; nop; nop; ");
+    HALF_CLOCK();
 
     // t4 
     gpio_put(PIN_CS, 1);
 }
 
+uint8_t cga_color(uint8_t gif_pixel) {
+    // colors are swapped in the palette. I wasted enough time trying to fix it. 
+    if (gif_pixel == 1) 
+        return 2;
+    if (gif_pixel == 2)
+        return 1;
+    return gif_pixel;     
+}
+
 // Draw Callback
-void GIFDraw(GIFDRAW *pDraw) {
+void GIFDrawCGA(GIFDRAW *pDraw) {
     if (pDraw->y == -1) return; // Header/Footer
 
     // Process line
@@ -101,10 +120,10 @@ void GIFDraw(GIFDRAW *pDraw) {
     
     for (int i = 0; i < width; i += 4) {
         // Collect 4 pixels
-        uint8_t p0 = (i < width) ? (s[i] % 4) : 0;
-        uint8_t p1 = (i + 1 < width) ? (s[i+1] % 4) : 0;
-        uint8_t p2 = (i + 2 < width) ? (s[i+2] % 4) : 0;
-        uint8_t p3 = (i + 3 < width) ? (s[i+3] % 4) : 0;
+        uint8_t p0 = (i < width) ? (cga_color(s[i])) : 0;
+        uint8_t p1 = (i + 1 < width) ? (cga_color(s[i+1])) : 0;
+        uint8_t p2 = (i + 2 < width) ? (cga_color(s[i+2])) : 0;
+        uint8_t p3 = (i + 3 < width) ? (cga_color(s[i+3])) : 0;
 
         uint8_t val = (p0 << 6) | (p1 << 4) | (p2 << 2) | p3;
 
@@ -115,15 +134,13 @@ void GIFDraw(GIFDRAW *pDraw) {
         int current_x = x + i;
         int x_byte = current_x / 4;
         
-        uint16_t address;
+        uint32_t address;
         if (y % 2 == 0) {
-            address = (y / 2) * 80 + x_byte;
+            address = ((y / 2) * 80 + x_byte) + 0xB8000;
         } else {
-            address = 0x2000 + (y / 2) * 80 + x_byte;
+            address = (0x2000 + (y / 2) * 80 + x_byte) + 0xB8000;
         }
         
-        address += 0xB8000;
-
         bus_write(address, val);
     }
 }
@@ -141,8 +158,8 @@ void setup() {
     }
 
     // D16
-    gpio_init(PIN_DATA_HIGH);
-    gpio_set_dir(PIN_DATA_HIGH, GPIO_OUT);
+    gpio_init(PIN_BUS_HIGH);
+    gpio_set_dir(PIN_BUS_HIGH, GPIO_OUT);
 
     // CS
     gpio_init(PIN_CS);
@@ -152,7 +169,7 @@ void setup() {
     Serial.println("Bus Interface Initialized (Bit-banged)");
 
     // Initialize GIF
-    gif.begin(LITTLE_ENDIAN_PIXELS);
+    gif.begin(GIF_PALETTE_RGB888);
     
     // Initialize LittleFS
     if (!LittleFS.begin()) {
@@ -163,12 +180,13 @@ void setup() {
 }
 
 void play(const char *szFilename) {
-    if (gif.open(szFilename, GIFOpenFile, GIFCloseFile, GIFReadFile, GIFSeekFile, GIFDraw)) {
+    if (gif.open(szFilename, GIFOpenFile, GIFCloseFile, GIFReadFile, GIFSeekFile, GIFDrawCGA)) {
         Serial.printf("GIF Opened. Canvas: %dx%d\n", gif.getCanvasWidth(), gif.getCanvasHeight());
         int lastResult = 0;
         while ((lastResult = gif.playFrame(true, NULL)) > 0) {
             // Playing
             Serial.println("frame");
+            delay(100);
         }
         if (lastResult == 0) {
             Serial.println("GIF Playback Completed");
@@ -178,14 +196,72 @@ void play(const char *szFilename) {
         }
         gif.close();
         Serial.println("GIF Finished. Restarting...");
-        delay(1000);
     } else {
         Serial.println("Error opening GIF");
         delay(5000);
     }
 }
 
+void bus_test() {
+    bus_write(0x0000, 0x00);
+    delay(100);
+    bus_write(0xFFFF, 0xFF);
+    delay(100);
+    bus_write(0x0000, 0x00);
+    delay(100);
+    bus_write(0x0001, 0x00);
+    delay(1000);
+    bus_write(0x0002, 0x00);
+    delay(1000);
+    bus_write(0x0004, 0x00);
+    delay(1000);
+    bus_write(0x0008, 0x00);
+    delay(1000);
+    bus_write(0x0010, 0x00);
+    delay(1000);
+    bus_write(0x0020, 0x00);
+    delay(1000);
+    bus_write(0x0040, 0x00);
+    delay(1000);
+    bus_write(0x0080, 0x00);
+    delay(1000);
+    bus_write(0x0100, 0x00);
+    delay(1000);
+    bus_write(0x0200, 0x00);
+    delay(1000);
+    bus_write(0x0400, 0x00);
+    delay(1000);
+    bus_write(0x0800, 0x00);
+    delay(1000);
+    bus_write(0x1000, 0x00);
+    delay(1000);
+    bus_write(0x2000, 0x00);
+    delay(1000);
+    bus_write(0x4000, 0x00);
+    delay(1000);
+    bus_write(0x8000, 0x00);
+    delay(1000);
+    bus_write(0x10000, 0x00);
+    delay(1000);
+    bus_write(0x00000, 0x01);
+    delay(1000);
+    bus_write(0x00000, 0x02);
+    delay(1000);
+    bus_write(0x00000, 0x04);
+    delay(1000);
+    bus_write(0x00000, 0x08);
+    delay(1000);
+    bus_write(0x00000, 0x10);
+    delay(1000);
+    bus_write(0x00000, 0x20);
+    delay(1000);
+    bus_write(0x00000, 0x40);
+    delay(1000);
+    bus_write(0x00000, 0x80);
+    delay(1000);    
+}
+
 void loop() {
-    play("/stan.gif");
+    play("/stan_cga.gif");
 }
 
