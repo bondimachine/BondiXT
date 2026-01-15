@@ -72,10 +72,15 @@ void drawPixel(int x, int y, uint8_t color) {
   vga_data_array[pixel] = color;
 }
 
-// Update CGA Memory Byte
-// offset: 0x0000 - 0x3FFF (16KB CGA Memory)
-// val: 8-bit value containing 4 pixels (2 bits each)
 void updateCGAByte(uint16_t offset, uint8_t val) {
+
+  // TODO: Support Text (02h)
+  // TOOD: Support high res mono CGA (06h)?
+
+  // Update CGA Memory Byte
+  // offset: 0x0000 - 0x3FFF (16KB CGA Memory)
+  // val: 8-bit value containing 4 pixels (2 bits each)
+
   // CGA Memory Layout:
   // Bank 0 (Even lines): 0x0000 - 0x1FFF
   // Bank 1 (Odd lines):  0x2000 - 0x3FFF
@@ -119,18 +124,39 @@ void updateCGAByte(uint16_t offset, uint8_t val) {
   }
 }
 
+void updateVGAByte(uint16_t offset, uint8_t val) {
+
+  // TODO: Support mode 10h
+
+  // VGA Mode 13h: 320x200, 256 colors
+  // Each byte represents one pixel
+
+  int vga_x = offset % 320;
+  int vga_y = offset / 320;
+
+  // Scale to VGA (2x)
+  // VGA 320x200 -> VGA 640x400
+  // Each pixel becomes a 2x2 block
+  int scaled_x = vga_x * 2;
+  int scaled_y = vga_y * 2;
+
+  uint8_t color = vga_palette_6bit[val]; // Direct mapping for 256-color mode
+
+  drawPixel(scaled_x, scaled_y, color);
+  drawPixel(scaled_x + 1, scaled_y, color);
+  drawPixel(scaled_x, scaled_y + 1, color);
+  drawPixel(scaled_x + 1, scaled_y + 1, color);
+
+}  
+
 void processMemoryBusMessage(uint32_t address, uint8_t value) {
   if (address < 0xB0000) {
-    // TODO: Support mode 10h
-    // MCGA / VGA at A0000 (13h)
-    // Ignore
+    updateVGAByte(address - 0xA0000, value);
   } else if (address < 0xB8000) {
     // We are mapping B0000 - B7FFF which is Hercules space as I/O
     // TODO: Support IO addresses at 0x3B0 - 0x3DF (CGA)
     // TODO: Support IO addresses EGA/VGA at 0x3C0 - 0x3DF?
   } else {
-    // TODO: Support Text (02h)
-    // TOOD: Support high res mono CGA (06h)?
     updateCGAByte(address - 0xB8000, value);
   }
 }

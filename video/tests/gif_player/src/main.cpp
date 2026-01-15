@@ -145,6 +145,22 @@ void GIFDrawCGA(GIFDRAW *pDraw) {
     }
 }
 
+void GIFDrawVGA13h(GIFDRAW *pDraw) {
+    if (pDraw->y == -1) return; // Header/Footer
+
+    // Process line
+    uint8_t *s = pDraw->pPixels;
+    int x = pDraw->iX;
+    int y = pDraw->y;
+    int width = pDraw->iWidth;
+
+    for (int i = 0; i < width; i++) {
+        uint8_t val = s[i];
+        uint32_t address = y * 320 + x + i + 0xA0000;        
+        bus_write(address, val);
+    }
+}
+
 void setup() {
     Serial.begin(115200);
     // while(!Serial) delay(10);
@@ -179,8 +195,8 @@ void setup() {
     Serial.println("LittleFS mounted");
 }
 
-void play(const char *szFilename) {
-    if (gif.open(szFilename, GIFOpenFile, GIFCloseFile, GIFReadFile, GIFSeekFile, GIFDrawCGA)) {
+void play(const char *szFilename, GIF_DRAW_CALLBACK *pfnDraw) {
+    if (gif.open(szFilename, GIFOpenFile, GIFCloseFile, GIFReadFile, GIFSeekFile, pfnDraw)) {
         Serial.printf("GIF Opened. Canvas: %dx%d\n", gif.getCanvasWidth(), gif.getCanvasHeight());
         int lastResult = 0;
         while ((lastResult = gif.playFrame(true, NULL)) > 0) {
@@ -262,6 +278,7 @@ void bus_test() {
 }
 
 void loop() {
-    play("/stan_cga.gif");
+    // play("/stan_cga.gif", GIFDrawCGA);
+    play("/stan_vga.gif", GIFDrawVGA13h);
 }
 

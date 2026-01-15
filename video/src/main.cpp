@@ -151,8 +151,8 @@ void setup() {
 // Process Bus Writes from PIO FIFO
 void processBus(PIO pio, uint sm) {
   // Check if FIFO is not empty
-  while (!pio_sm_is_rx_fifo_empty(pio, sm)) {
-    uint32_t data = pio_sm_get(pio, sm);
+  while (true) {
+    uint32_t data = pio_sm_get_blocking(pio, sm);
 
     // Format from bus.pio:
     // ISR = [Address (17) << 8 | Data (8)]
@@ -160,10 +160,10 @@ void processBus(PIO pio, uint sm) {
     uint8_t value = data & 0xFF;
     uint32_t full_address = ((data >> 8) & 0x1FFFF) + 0xA0000;
 
-    Serial.print("Address: ");
-    Serial.println(full_address, HEX);
-    Serial.print("Value: ");
-    Serial.println(value, HEX);
+    // Serial.print("Address: ");
+    // Serial.println(full_address, HEX);
+    // Serial.print("Value: ");
+    // Serial.println(value, HEX);
 
     processMemoryBusMessage(full_address, value);
 
