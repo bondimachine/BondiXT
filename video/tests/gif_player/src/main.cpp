@@ -202,7 +202,7 @@ void play(const char *szFilename, GIF_DRAW_CALLBACK *pfnDraw) {
         while ((lastResult = gif.playFrame(true, NULL)) > 0) {
             // Playing
             Serial.println("frame");
-            delay(100);
+            delay(10);
         }
         if (lastResult == 0) {
             Serial.println("GIF Playback Completed");

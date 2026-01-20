@@ -45,7 +45,27 @@ const uint8_t PIN_VGA_RGB_BASE = 17; // R, R+, G, G+, B, B+ (6 pins)
 PIO pio_bus = pio0;
 int sm_bus = -1;
 
+// #define USE_BUS_DMA
+
+#ifdef USE_BUS_DMA
+int dma_channel_bus = -1;
+
+#define BUS_BUFFER_SIZE 1024
+#define BUS_BUFFER_SIZE_BITS 10
+uint32_t buffer_bus[BUS_BUFFER_SIZE]; //__attribute__((aligned(2*BUS_BUFFER_SIZE)));
+uint16_t buffer_bus_read_index = 0;
+
+// DMA IRQ Handler for Bus Interface
+void on_buffer_bus_full() {
+
+  dma_hw->ints0 = 1u << dma_channel_bus;
+  dma_channel_set_write_addr(dma_channel_bus, buffer_bus, true);
+}
+
+#endif
+
 void demo(int color);
+
 
 void setup() {
   Serial.begin(115200);
@@ -63,6 +83,32 @@ void setup() {
   }
 
   bus_program_init(pio_bus, sm_bus, offset_bus, PIN_BUS_BASE);
+
+  #ifdef USE_BUS_DMA
+  // Setup dma for read
+  dma_channel_bus = dma_claim_unused_channel(false);
+  if (dma_channel_bus < 0) {
+      panic("No free dma channels");
+  }
+  dma_channel_config dma_config_bus = dma_channel_get_default_config(dma_channel_bus);
+  channel_config_set_transfer_data_size(&dma_config_bus, DMA_SIZE_32);
+  channel_config_set_read_increment(&dma_config_bus, false);
+  channel_config_set_write_increment(&dma_config_bus, true);
+  
+  // enable irq for rx
+  dma_channel_set_irq0_enabled(dma_channel_bus, true);
+
+  // setup dma to read from pio fifo
+  channel_config_set_dreq(&dma_config_bus, pio_get_dreq(pio_bus, sm_bus, false /* receive */));
+
+  // channel_config_set_ring(&dma_config_bus, true /* write */, BUS_BUFFER_SIZE_BITS);
+  
+  irq_set_exclusive_handler(DMA_IRQ_0, on_buffer_bus_full);
+  irq_set_enabled(DMA_IRQ_0, true);
+
+  // dma started
+  dma_channel_configure(dma_channel_bus, &dma_config_bus, buffer_bus, &pio_bus->rxf[sm_bus], BUS_BUFFER_SIZE, true /* start*/); 
+  #endif
   Serial.println("Bus Interface Initialized");
 
   // --- VGA Initialization ---
@@ -82,8 +128,12 @@ void setup() {
   rgb_program_init(pio_vga, rgb_sm, rgb_offset, PIN_VGA_RGB_BASE);
 
   // DMA channels - 0 sends color data, 1 reconfigures and restarts 0
-  int rgb_chan_0 = 0;
-  int rgb_chan_1 = 1;
+  int rgb_chan_0 = dma_claim_unused_channel(false);
+  int rgb_chan_1 = dma_claim_unused_channel(false);
+
+  if (rgb_chan_0 < 0 || rgb_chan_1 < 0) {
+      panic("No free dma channels");
+  }
 
   // Channel Zero (sends color data to PIO VGA machine)
   dma_channel_config c0 =
@@ -150,9 +200,13 @@ void setup() {
 
 // Process Bus Writes from PIO FIFO
 void processBus(PIO pio, uint sm) {
-  // Check if FIFO is not empty
   while (true) {
+    #ifdef USE_BUS_DMA
+    uint32_t data = buffer_bus[buffer_bus_read_index];
+    buffer_bus_read_index = (buffer_bus_read_index + 1) % BUS_BUFFER_SIZE;
+    #else
     uint32_t data = pio_sm_get_blocking(pio, sm);
+    #endif
 
     // Format from bus.pio:
     // ISR = [Address (17) << 8 | Data (8)]
