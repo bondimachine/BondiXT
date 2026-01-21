@@ -1,0 +1,51 @@
+Name     BondiXT ;
+PartNo   00 ;
+Date     11/19/2025 ;
+Revision 01 ;
+Designer BondiMachine ;
+Company  BondiMachine ;
+Assembly None ;
+Location None ;
+Device   g20v8a ;
+
+/* *************** INPUT PINS *********************/
+PIN  1  = CLK ; /* */ 
+
+PIN  2  = A4 ; /* */ 
+PIN  3  = A5 ; /* */ 
+PIN  4  = A6 ; /* */ 
+PIN  5  = A7 ; /* */ 
+PIN  6  = A8 ; /* */ 
+PIN  7  = A9 ; /* */ 
+
+PIN  8  = A17 ; /* */ 
+PIN  9  = A18 ; /* */ 
+PIN  10 = A19 ; /* */ 
+
+PIN  23  = IO ; /* I/O=1 ? puertos, I/O=0 ? memoria */ 
+
+/* *************** OUTPUT PINS *********************/
+ PIN 15 = !COM1 ;   	/* 0x3F0-0x3FF (cuando IO=1)*/
+ PIN 16 = !COM2 ;   	/* 0x2F0-0x2FF (cuando IO=1)*/
+ PIN 17 = !LPT1 ;   	/* 0x370-0x37F (cuando IO=1)*/
+ PIN 18 = !LPT2 ;   	/* 0x270-0x27F (cuando IO=1)*/
+
+ PIN 19 = !RAML ;   	/* 0x00000-0x7FFFF (cuando IO=0) */
+ PIN 20 = !RAMH ;   	/* 0x80000-0xDFFFF (cuando IO=0) */
+ PIN 21 = !ROM  ;   	/* 0xE0000-0xFFFFF (cuando IO=0) */ 
+
+ PIN 22 = !FBUFFER ; 	/* 0xA0000-0xBFFFF (cuando IO=1)*/
+
+
+/* combinatorial logic */
+
+ COM1 =  IO & A9 &  A8 &  A7 & A6 &  A5 & A4;  	/* 0x3F0-0x3FF ? A9..A4 = 1 1 1 1 1 1 */
+ COM2 =  IO & A9 & !A8 &  A7 & A6 &  A5 & A4;  	/* 0x2F0-0x2FF ? A9..A4 = 1 0 1 1 1 1 */
+ LPT1 =  IO & A9 &  A8 & !A7 & A6 &  A5 & A4;  	/* 0x370-0x37F ? A9..A4 = 1 1 0 1 1 1 */
+ LPT2 =  IO & A9 & !A8 & !A7 & A6 &  A5 & A4;  	/* 0x270-0x27F ? A9..A4 = 1 0 0 1 1 1 */
+
+ RAML    = !IO & !A19 ;                           /* 0x00000-0x7FFFF ? A19 = 0 */
+ RAMH    = !IO &  A19 & !A18 & !A17 ; 	   	/* 0x80000-0x9FFFF ? A19..A17 = 100 */
+ ROM     = !IO &  A19 &  A18 &  A17;	       /* 0xE0000-0xFFFFF ? A19..A17 = 1 1 1 */
+
+ FBUFFER = !IO &  A19 & !A18 &  A17 ;       	/* 0xA0000-0xBFFFF ? A19..A16 = 1011 */
