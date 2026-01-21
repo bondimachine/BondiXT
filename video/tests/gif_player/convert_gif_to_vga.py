@@ -4,22 +4,28 @@ from PIL import Image
 def generate_vga_palette():
     """Generates the standard 256-color VGA BIOS palette."""
     palette = [
+		# 16 colors EGA/CGA
 	(0x00, 0x00, 0x00),
 	(0x00, 0x00, 0xaa),
 	(0x00, 0xaa, 0x00),
 	(0x00, 0xaa, 0xaa),
+
 	(0xaa, 0x00, 0x00),
 	(0xaa, 0x00, 0xaa),
 	(0xaa, 0x55, 0x00),
 	(0xaa, 0xaa, 0xaa),
+
 	(0x55, 0x55, 0x55),
 	(0x55, 0x55, 0xff),
 	(0x55, 0xff, 0x55),
 	(0x55, 0xff, 0xff),
+
 	(0xff, 0x55, 0x55),
 	(0xff, 0x55, 0xff),
 	(0xff, 0xff, 0x55),
 	(0xff, 0xff, 0xff),
+
+	# grayscale
 	(0x00, 0x00, 0x00),
 	(0x14, 0x14, 0x14),
 	(0x20, 0x20, 0x20),
@@ -41,6 +47,8 @@ def generate_vga_palette():
 	(0x7d, 0x00, 0xff),
 	(0xbe, 0x00, 0xff),
 	(0xff, 0x00, 0xff),
+
+	# colors 
 	(0xff, 0x00, 0xbe),
 	(0xff, 0x00, 0x7d),
 	(0xff, 0x00, 0x41),
@@ -268,11 +276,11 @@ def generate_vga_palette():
 
     return result
 
-def convert_gif_to_vga(input_path, output_path):
+def convert_gif_to_vga(input_path, output_path, colors=256):
     # Load the original GIF
     with Image.open(input_path) as img:
         # Create a palette image to use as a template
-        vga_palette = generate_vga_palette()
+        vga_palette = generate_vga_palette()[0:(colors*3)]
         palette_img = Image.new('P', (1, 1))
         palette_img.putpalette(vga_palette)
 
@@ -293,6 +301,7 @@ def convert_gif_to_vga(input_path, output_path):
 
 				# Convert to RGB (no alpha) then quantize to the VGA palette (Nearest Neighbor)
                 new_frame = composited.convert('RGB').quantize(palette=palette_img, dither=Image.Dither.NONE)
+                new_frame.encoderinfo = { "disposal": 2 }
                 frames.append(new_frame)
 
                 img.seek(img.tell() + 1)
@@ -305,13 +314,13 @@ def convert_gif_to_vga(input_path, output_path):
             save_all=True,
             append_images=frames[1:],
             loop=img.info.get('loop', 0),
-            duration=img.info.get('duration', 100),
-            palette=palette_img.getpalette()
+            duration=100,
+            optimize=False
         )
     print(f"Successfully converted '{input_path}' to VGA palette at '{output_path}'")
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: python convert_gif_to_vga.py input.gif output.gif")
+        print("Usage: python convert_gif_to_vga.py input.gif output.gif [colors]")
     else:
-        convert_gif_to_vga(sys.argv[1], sys.argv[2])
+        convert_gif_to_vga(sys.argv[1], sys.argv[2], int(sys.argv[3]) if len(sys.argv) > 3 else 256)

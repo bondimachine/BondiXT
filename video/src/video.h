@@ -6,6 +6,12 @@
 unsigned char vga_data_array[FRAME_BUFFER_SIZE];
 unsigned char *address_pointer = &vga_data_array[0];
 
+// VGA video mode - 0x10 for mode 10h, 0x13 for mode 13h
+uint8_t current_video_mode = 0x13;
+
+
+// VGA register emulation for mode 10h
+uint8_t vga_write_plane_mask = 0x0F;  // Sequencer Map Mask Register (index 2) - all planes enabled by default
 
 // this is BBGGRR copied from CGA palette (ish)
 #define BLACK         0b00000000
@@ -28,6 +34,18 @@ unsigned char *address_pointer = &vga_data_array[0];
 const uint8_t CGA_PALETTE16[16] = {BLACK, BLUE, GREEN, CYAN, RED, MAGENTA, BROWN, LIGHT_GRAY, 
   DARK_GRAY, LIGHT_BLUE, LIGHT_GREEN, LIGHT_CYAN, LIGHT_RED, LIGHT_MAGENTA, YELLOW, WHITE};
 
+// Reverse lookup: 6-bit color (0-63) -> 4-bit palette index (0-15)
+// Precomputed for O(1) lookup. Unmapped colors default to 0 (BLACK).
+// Mappings: BLACK=0, BLUE=32, GREEN=8, CYAN=40, RED=2, MAGENTA=51, BROWN=31,
+//           LIGHT_GRAY=42, DARK_GRAY=21, LIGHT_BLUE=53, LIGHT_GREEN=29,
+//           LIGHT_CYAN=61, LIGHT_RED=23, LIGHT_MAGENTA=55, YELLOW=31, WHITE=63
+const uint8_t CGA_PALETTE16_REVERSE[64] = {
+//  0   1   2   3   4   5   6   7   8   9  10  11  12  13  14  15
+    0,  0,  4,  0,  0,  0,  0,  0,  2,  0,  0,  0,  0,  0,  0,  0,  // 0-15
+    0,  0,  0,  0,  0,  8,  0, 12,  0,  0,  0,  0,  0, 10,  0,  6,  // 16-31  (21=DARK_GRAY, 23=LIGHT_RED, 29=LIGHT_GREEN, 31=BROWN/YELLOW)
+    1,  0,  0,  0,  0,  0,  0,  0,  3,  0,  7,  0,  0,  0,  0,  0,  // 32-47  (32=BLUE, 40=CYAN, 42=LIGHT_GRAY)
+    0,  0,  0,  5,  0,  9,  0, 13,  0,  0,  0,  0,  0, 11,  0, 15,  // 48-63  (51=MAGENTA, 53=LIGHT_BLUE, 55=LIGHT_MAGENTA, 61=LIGHT_CYAN, 63=WHITE)
+};
 
 // CGA Palette Definitions
 // We only have 8 colors, so we map CGA colors to the closest available
@@ -125,29 +143,95 @@ void updateCGAByte(uint16_t offset, uint8_t val) {
 }
 
 void updateVGAByte(uint16_t offset, uint8_t val) {
+  if (current_video_mode == 0x10 || current_video_mode == 0x12) {
+    // VGA Mode 10h: 640x350, 16 colors, 4 bit planes
+    // VGA Mode 12h: 640x480, 16 colors, 4 bit planes
+    // Both use identical planar memory organization:
+    // - Each address in video memory maps to the same offset in all 4 planes
+    // - The vga_write_plane_mask determines which planes are written
+    // - Each byte represents 8 consecutive horizontal pixels
+    // - The color of each pixel is determined by combining bits from all 4 planes
 
-  // TODO: Support mode 10h
+    int max_rows = (current_video_mode == 0x12) ? 480 : 350;
 
-  // VGA Mode 13h: 320x200, 256 colors
-  // Each byte represents one pixel
+    // Calculate the starting pixel position
+    // 640 pixels wide, so 80 bytes per row
+    int byte_x = offset % 80;  // Which byte in the row (0-79)
+    int pixel_y = offset / 80; // Which row
+    int pixel_x_base = byte_x * 8; // Starting X position (each byte = 8 pixels)
 
-  int vga_x = offset % 320;
-  int vga_y = offset / 320;
+    if (pixel_y >= max_rows) {
+      return; // Out of visible area
+    }
 
-  // Scale to VGA (2x)
-  // VGA 320x200 -> VGA 640x400
-  // Each pixel becomes a 2x2 block
-  int scaled_x = vga_x * 2;
-  int scaled_y = vga_y * 2;
+    // Update all 8 pixels represented by this byte
+    for (int bit = 0; bit < 8; bit++) {
+      int pixel_x = pixel_x_base + bit;
+      int pixel_offset = pixel_y * 640 + pixel_x;
+      
+      // Bit 7 is leftmost pixel, bit 0 is rightmost
+      int bit_position = 7 - bit;
+      uint8_t incoming_bit = (val >> bit_position) & 1;
+      
+      // Read current pixel color and find its palette index using precomputed table
+      uint8_t current_color = vga_data_array[pixel_offset];
+      uint8_t current_index = CGA_PALETTE16_REVERSE[current_color & 0x3F];
+      
+      // Modify the bits for the planes being written
+      uint8_t new_index = current_index;
+      for (int plane = 0; plane < 4; plane++) {
+        if (vga_write_plane_mask & (1 << plane)) {
+          // Update this plane's bit with the incoming bit
+          if (incoming_bit) {
+            new_index |= (1 << plane);
+          } else {
+            new_index &= ~(1 << plane);
+          }
+        }
+      }
+      // Write the new color
+      vga_data_array[pixel_offset] = CGA_PALETTE16[new_index];
+    }
+  } else {
+    // VGA Mode 13h: 320x200, 256 colors
+    // Each byte represents one pixel
 
-  uint8_t color = vga_palette_6bit[val]; // Direct mapping for 256-color mode
+    int vga_x = offset % 320;
+    int vga_y = offset / 320;
 
-  drawPixel(scaled_x, scaled_y, color);
-  drawPixel(scaled_x + 1, scaled_y, color);
-  drawPixel(scaled_x, scaled_y + 1, color);
-  drawPixel(scaled_x + 1, scaled_y + 1, color);
+    // Scale to VGA (2x)
+    // VGA 320x200 -> VGA 640x400
+    // Each pixel becomes a 2x2 block
+    int scaled_x = vga_x * 2;
+    int scaled_y = vga_y * 2;
 
-}  
+    uint8_t color = vga_palette_6bit[val]; // Direct mapping for 256-color mode
+
+    drawPixel(scaled_x, scaled_y, color);
+    drawPixel(scaled_x + 1, scaled_y, color);
+    drawPixel(scaled_x, scaled_y + 1, color);
+    drawPixel(scaled_x + 1, scaled_y + 1, color);
+  }
+}
+
+void processIO(uint16_t address, uint8_t value) {
+  switch (address) {
+    case 0x3C2: // Miscellaneous Output Register
+      // this is really crappy, but kinda works
+      if (value == 0xa3) {
+        current_video_mode = 0x10;
+      } else if (value == 0xe3) {
+        current_video_mode = 0x12;
+      } else {
+        current_video_mode = 0x13;
+      }
+      break;
+    case 0x3CF: 
+      // graphics mode data register
+      vga_write_plane_mask = value & 0x0F;
+      break;
+  }  
+}
 
 void processMemoryBusMessage(uint32_t address, uint8_t value) {
   if (address < 0xB0000) {
@@ -156,6 +240,7 @@ void processMemoryBusMessage(uint32_t address, uint8_t value) {
     // We are mapping B0000 - B7FFF which is Hercules space as I/O
     // TODO: Support IO addresses at 0x3B0 - 0x3DF (CGA)
     // TODO: Support IO addresses EGA/VGA at 0x3C0 - 0x3DF?
+    processIO((uint16_t)(address - 0xB0000), value);
   } else {
     updateCGAByte(address - 0xB8000, value);
   }

@@ -51,7 +51,6 @@ int32_t GIFSeekFile(GIFFILE *pFile, int32_t iPosition) {
   return iPosition;
 }
 
-
 // Helper to write to bus (Bit-banged)
 void bus_write(uint32_t address, uint8_t data) {
 
@@ -90,6 +89,13 @@ void bus_write(uint32_t address, uint8_t data) {
     // t4 
     gpio_put(PIN_CS, 1);
 }
+
+void bus_write_important(uint32_t address, uint8_t data) {
+    for(int i = 0; i < 20; i++) {
+        bus_write(address, data);
+    }
+}
+
 
 uint8_t cga_color(uint8_t gif_pixel) {
     // colors are swapped in the palette. I wasted enough time trying to fix it. 
@@ -158,6 +164,36 @@ void GIFDrawVGA13h(GIFDRAW *pDraw) {
         uint8_t val = s[i];
         uint32_t address = y * 320 + x + i + 0xA0000;        
         bus_write(address, val);
+    }
+}
+
+void GIFDrawVGA12h(GIFDRAW *pDraw) {
+    if (pDraw->y == -1) return; 
+
+    // Process line
+    uint8_t *s = pDraw->pPixels;
+    int x = pDraw->iX;
+    int y = pDraw->y;
+    int width = pDraw->iWidth;
+
+    int memory_x = x / 8;
+    for (int plane = 0; plane < 4; plane++) {
+        bus_write_important(0xB03CF, (1 << plane));
+
+        for (int i = 0; i < width; i+=8, memory_x++) {
+            // 8 pixels at a time
+            // For each plane 0-3
+            uint8_t vga_byte = 0;
+            for (int bit = 0; bit < 8; bit++) {
+                if (s[i+bit] & (1 << plane)) {
+                    vga_byte |= (1 << (7 - bit));
+                }
+            }
+                
+            uint32_t addr = 0xA0000 + y * 80 + memory_x;
+            
+            bus_write(addr, vga_byte);
+        }
     }
 }
 
@@ -279,6 +315,11 @@ void bus_test() {
 
 void loop() {
     // play("/stan_cga.gif", GIFDrawCGA);
-    play("/stan_vga.gif", GIFDrawVGA13h);
+    // play("/stan_vga.gif", GIFDrawVGA13h);
+    #if MAX_WIDTH < 640
+        #error "MAX_WIDTH must be at least 640 for VGA test"
+    #endif
+    bus_write_important(0xB03c2, 0xe3);
+    play("/win31.gif", GIFDrawVGA12h);
 }
 

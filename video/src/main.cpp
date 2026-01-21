@@ -214,11 +214,6 @@ void processBus(PIO pio, uint sm) {
     uint8_t value = data & 0xFF;
     uint32_t full_address = ((data >> 8) & 0x1FFFF) + 0xA0000;
 
-    // Serial.print("Address: ");
-    // Serial.println(full_address, HEX);
-    // Serial.print("Value: ");
-    // Serial.println(value, HEX);
-
     processMemoryBusMessage(full_address, value);
 
   }
