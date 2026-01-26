@@ -197,6 +197,38 @@ void GIFDrawVGA12h(GIFDRAW *pDraw) {
     }
 }
 
+void GIFDrawCGAHiRes(GIFDRAW *pDraw) {
+    if (pDraw->y == -1) return; // Header/Footer
+
+    // Process line
+    uint8_t *s = pDraw->pPixels;
+    int x = pDraw->iX;
+    int y = pDraw->y;
+    int width = pDraw->iWidth;
+
+    // We need to pack 8 pixels into a byte
+    // CGA pixels are 2 bits each.
+    // Byte: P0 P1 P2 P3 P4 P5 P6 P7 (High -> Low)
+    
+    // We assume we start at a byte boundary for simplicity in this test
+    // If x is not multiple of 8, we might overwrite/read-modify-write, 
+    // but here we are the master overwriting.
+    
+    for (int i = 0; i < width; i += 8) {
+        uint8_t pixel_val = 0;
+        for (int bit = 0; bit < 8; bit++) {
+            pixel_val |= (s[i+bit] & 0b1) << (7-bit);
+        }
+        int current_x = x + i;
+        int x_byte = current_x / 8;
+        
+        uint32_t address = (y * 80 + x_byte) + 0xB8000;
+        
+        bus_write(address, pixel_val);
+    }
+}
+
+
 void setup() {
     Serial.begin(115200);
     // while(!Serial) delay(10);
@@ -319,7 +351,9 @@ void loop() {
     #if MAX_WIDTH < 640
         #error "MAX_WIDTH must be at least 640 for VGA test"
     #endif
-    bus_write_important(0xB03c2, 0xe3);
-    play("/win31.gif", GIFDrawVGA12h);
+    // bus_write_important(0xB03c2, 0xe3);
+    // play("/win31.gif", GIFDrawVGA12h);
+    bus_write_important(0xB03d8, 0b1001);
+    play("/simcity.gif", GIFDrawCGAHiRes);
 }
 

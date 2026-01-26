@@ -93,53 +93,76 @@ void drawPixel(int x, int y, uint8_t color) {
 void updateCGAByte(uint16_t offset, uint8_t val) {
 
   // TODO: Support Text (02h)
-  // TOOD: Support high res mono CGA (06h)?
 
   // Update CGA Memory Byte
   // offset: 0x0000 - 0x3FFF (16KB CGA Memory)
-  // val: 8-bit value containing 4 pixels (2 bits each)
+  // val: 8-bit value containing 4 pixels OR 8 pixels depending on mode
 
   // CGA Memory Layout:
   // Bank 0 (Even lines): 0x0000 - 0x1FFF
   // Bank 1 (Odd lines):  0x2000 - 0x3FFF
-  // Line width: 80 bytes (320 pixels)
+  // Line width: 80 bytes (320/640 pixels)
 
   int cga_y;
   int cga_x_byte;
 
-  if (offset < 0x2000) {
-    // Bank 0 (Even lines)
-    cga_y = (offset / 80) * 2;
+  if (current_video_mode == 0x6) {
+    // CGA Graphics Mode 6: 640x200, 2 colors (1 bit per pixel)
+    // Each byte contains 8 pixels: P0 P1 P2 P3 P4 P5 P6 P7 (High bits -> Low bits)
+
+    cga_y = (offset / 80);
     cga_x_byte = offset % 80;
+    for (int i = 0; i < 8; i++) {
+      uint8_t pixel_val = (val >> (7 - i)) & 0b1;
+      uint8_t color = pixel_val ? WHITE : BLACK;
+
+      int cga_x = cga_x_byte * 8 + i;
+
+      // Scale to VGA (2x)
+      // CGA 640x200 -> VGA 640x400
+      // Each CGA pixel becomes a 1x2 VGA block
+      int vga_x = cga_x;
+      int vga_y = cga_y * 2;
+
+      drawPixel(vga_x, vga_y, color);
+      drawPixel(vga_x, vga_y + 1, color);
+    }
   } else {
-    // Bank 1 (Odd lines)
-    cga_y = ((offset - 0x2000) / 80) * 2 + 1;
-    cga_x_byte = (offset - 0x2000) % 80;
-  }
+    if (offset < 0x2000) {
+      // Bank 0 (Even lines)
+      cga_y = (offset / 80) * 2;
+      cga_x_byte = offset % 80;
+    } else {
+      // Bank 1 (Odd lines)
+      cga_y = ((offset - 0x2000) / 80) * 2 + 1;
+      cga_x_byte = (offset - 0x2000) % 80;
+    }
 
-  // Each byte contains 4 pixels: P0 P1 P2 P3 (High bits -> Low bits)
-  // P0: bits 7-6
-  // P1: bits 5-4
-  // P2: bits 3-2
-  // P3: bits 1-0
+    // CGA Graphics Mode 4: 320x200, 4 colors (2 bits per pixel)}
+    // Each byte contains 4 pixels: P0 P1 P2 P3 (High bits -> Low bits)
+    // P0: bits 7-6
+    // P1: bits 5-4
+    // P2: bits 3-2
+    // P3: bits 1-0
 
-  for (int i = 0; i < 4; i++) {
-    uint8_t pixel_val = (val >> (6 - (i * 2))) & 0b11;
-    uint8_t color = getCGAColor(pixel_val);
+    for (int i = 0; i < 4; i++) {
+      uint8_t pixel_val = (val >> (6 - (i * 2))) & 0b11;
+      uint8_t color = getCGAColor(pixel_val);
 
-    int cga_x = cga_x_byte * 4 + i;
+      int cga_x = cga_x_byte * 4 + i;
 
-    // Scale to VGA (2x)
-    // CGA 320x200 -> VGA 640x400
-    // Each CGA pixel becomes a 2x2 VGA block
-    int vga_x = cga_x * 2;
-    int vga_y = cga_y * 2;
+      // Scale to VGA (2x)
+      // CGA 320x200 -> VGA 640x400
+      // Each CGA pixel becomes a 2x2 VGA block
+      int vga_x = cga_x * 2;
+      int vga_y = cga_y * 2;
 
-    drawPixel(vga_x, vga_y, color);
-    drawPixel(vga_x + 1, vga_y, color);
-    drawPixel(vga_x, vga_y + 1, color);
-    drawPixel(vga_x + 1, vga_y + 1, color);
-  }
+      drawPixel(vga_x, vga_y, color);
+      drawPixel(vga_x + 1, vga_y, color);
+      drawPixel(vga_x, vga_y + 1, color);
+      drawPixel(vga_x + 1, vga_y + 1, color);
+    }
+  }  
 }
 
 void updateVGAByte(uint16_t offset, uint8_t val) {
@@ -216,6 +239,22 @@ void updateVGAByte(uint16_t offset, uint8_t val) {
 
 void processIO(uint16_t address, uint8_t value) {
   switch (address) {
+    case 0x3D8:
+      // CGA Mode control register
+      if (value & 0x1) { // graphics mode
+        if (value & 0x8) {
+          current_video_mode = 0x6; // 640x200 mono
+        } else {
+          current_video_mode = 0x4; // 320x200 color
+        }
+      } else { // text mode
+        current_video_mode = 0x2; // 80x25 text
+      }
+      break;
+    case 0x3D9:
+      // CGA Color control register
+      current_palette_idx = (value & 0x10);
+      break;
     case 0x3C2: // Miscellaneous Output Register
       // this is really crappy, but kinda works
       if (value == 0xa3) {
@@ -238,8 +277,6 @@ void processMemoryBusMessage(uint32_t address, uint8_t value) {
     updateVGAByte(address - 0xA0000, value);
   } else if (address < 0xB8000) {
     // We are mapping B0000 - B7FFF which is Hercules space as I/O
-    // TODO: Support IO addresses at 0x3B0 - 0x3DF (CGA)
-    // TODO: Support IO addresses EGA/VGA at 0x3C0 - 0x3DF?
     processIO((uint16_t)(address - 0xB0000), value);
   } else {
     updateCGAByte(address - 0xB8000, value);

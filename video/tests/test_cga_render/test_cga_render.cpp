@@ -1,6 +1,31 @@
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <vector>
+#include <algorithm>
 #include "../../src/video.h"
+
+// BMP Header structures (simplified)
+#pragma pack(push, 1)
+struct BMPHeader {
+    uint16_t signature;
+    uint32_t fileSize;
+    uint32_t reserved;
+    uint32_t dataOffset;
+    uint32_t headerSize;
+    int32_t  width;
+    int32_t  height;
+    uint16_t planes;
+    uint16_t bitCount;
+    uint32_t compression;
+    uint32_t imageSize;
+    int32_t  xPixelsPerMeter;
+    int32_t  yPixelsPerMeter;
+    uint32_t colorsUsed;
+    uint32_t colorsImportant;
+};
+#pragma pack(pop)
+
 
 void drawTestImageThruBus() {
 processMemoryBusMessage(0xB8000, 0x0);
@@ -11685,8 +11710,50 @@ processMemoryBusMessage(0xBB6CE, 0x0);
 processMemoryBusMessage(0xBB6CF, 0x0);
 }
 
+
+void drawHighRes() {
+    FILE *f = fopen("simcity.bmp", "rb");
+    if (!f) {
+        printf("Error: Could not open simcity.bmp\n");
+        exit(1);
+    }
+
+    BMPHeader header;
+    fread(&header, sizeof(header), 1, f);
+    if (header.bitCount != 1 || header.width != 640 || abs(header.height) != 200) {
+        printf("Error: Unsupported BMP format. Expected 640x200 1bpp.\n");
+        fclose(f);
+        exit(1);
+    }
+    // Seek to pixel data
+    fseek(f, header.dataOffset, SEEK_SET);
+
+    int rowSize = (header.width + 1) / 8;
+    std::vector<uint8_t> buffer(rowSize * abs(header.height));
+    fread(buffer.data(), 1, buffer.size(), f);
+    fclose(f);
+
+    // Set video mode 06h
+    processMemoryBusMessage(0xB03d8, 0b1001);
+
+    // Process image
+    // BMP is usually bottom-up
+    bool bottomUp = (header.height > 0);
+    int height = abs(header.height);
+
+    for (int y = 0; y < height; y++) {
+        int srcY = bottomUp ? (height - 1 - y) : y;
+        const uint8_t* rowPtr = &buffer[srcY * rowSize];
+
+        for (int byte_x = 0; byte_x < 80; byte_x++) {
+            processMemoryBusMessage(0xB8000 + y * 80 + byte_x, rowPtr[byte_x]);
+        }
+    }
+}
+
 int main() {
     drawTestImageThruBus();
+    //drawHighRes();
 	FILE *f = fopen("test_cga_render.ppm", "w+");
 	fprintf(f, "P3\n640 480 255\n");
 	for (int y = 0; y < 480; y++) {
