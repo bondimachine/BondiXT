@@ -99,9 +99,9 @@ _start:
 
 int11_handler:
     ; 1 floppy 
-    ; 80x25 mono
+    ; 80x25 cga
     ; 1 rs232 port
-    mov ax, 0x231
+    mov ax, 0x221
     iret
 
 int12_handler:
