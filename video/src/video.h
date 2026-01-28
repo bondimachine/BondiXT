@@ -241,7 +241,7 @@ void processIO(uint16_t address, uint8_t value) {
   switch (address) {
     case 0x3D8:
       // CGA Mode control register
-      if (value & 0x1) { // graphics mode
+      if (value & 0x2) { // graphics mode
         if (value & 0x8) {
           current_video_mode = 0x6; // 640x200 mono
         } else {

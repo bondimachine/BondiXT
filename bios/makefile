@@ -15,7 +15,7 @@ rom: $(BIN) disk.bin
 	truncate -s 124kb disk.bin.truncated
 	cat disk.bin.truncated $(BIN).truncated > rom.bin
 
-$(BIN): $(ASM) serial.asm video_serial.asm keyboard_serial.asm disk_embedded.asm config.serial.inc
+$(BIN): $(ASM) serial.asm video_serial.asm keyboard_serial.asm disk_embedded.asm config.serial.inc video_custom.asm
 	nasm $(NASM_FLAGS) -f bin -o $(BIN) $(ASM)
 
 $(BIN).elf: rom

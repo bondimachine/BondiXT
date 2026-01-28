@@ -91,7 +91,8 @@ _start:
 
 %include "serial.asm"
 %include "serial_util.asm"
-%include "video_serial.asm"
+; %include "video_serial.asm"
+%include "video_custom.asm"
 %include "keyboard_serial.asm"
 %include "disk_embedded.asm"
 
