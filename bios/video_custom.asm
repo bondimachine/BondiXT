@@ -11,6 +11,9 @@ int10_handler:
     cmp ah, 0x00         
     je .set_video_mode
 
+    cmp ah, 0xb
+    je .set_palette_cga
+
     cmp ah, 0x0e          
     je .teletype_output
 
@@ -88,6 +91,14 @@ int10_handler:
     mov dx, 0x40
     mov es, dx
     mov byte [es:DATA_AREA_VIDEO_MODE], al
+    jmp .done
+
+.set_palette_cga:
+    mov dx, 0x3D9
+    mov al, 0x1
+    and al, bl
+    rol al, 5
+    out dx, al
     jmp .done
 
 .teletype_output:
