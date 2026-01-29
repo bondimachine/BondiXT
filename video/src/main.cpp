@@ -11,7 +11,9 @@
 /*
  * HARDWARE CONNECTIONS
  *  - GPIO 0-7 --> AD0-AD7
- *  - GPIO 8-16 -> A8-A16
+ *  - GPIO 8-14 -> A8-A14
+ *  - GPIO 15 ---> A15 || I/O while T1, A16 while T2
+ *  - GPIO 16 ---> CLK
  *  - GPIO 17 ---> 1k ohm resistor ---> VGA Red
  *  - GPIO 18 ---> 330 ohm resistor ---> VGA Red
  *  - GPIO 19 ---> 1k ohm resistor ---> VGA Green
@@ -20,7 +22,7 @@
  *  - GPIO 22 ---> 330 ohm resistor ---> VGA Blue
  *  - GPIO 26 ---> VGA Hsync
  *  - GPIO 27 ---> VGA Vsync
- *  - GPIO 28 ---> /CS & /CLK
+ *  - GPIO 28 ---> /CS
  *  - RP2040 GND ---> VGA GND
  */
 
@@ -45,14 +47,14 @@ const uint8_t PIN_VGA_RGB_BASE = 17; // R, R+, G, G+, B, B+ (6 pins)
 PIO pio_bus = pio0;
 int sm_bus = -1;
 
-// #define USE_BUS_DMA
+#define USE_BUS_DMA
 
 #ifdef USE_BUS_DMA
 int dma_channel_bus = -1;
 
 #define BUS_BUFFER_SIZE 1024
 #define BUS_BUFFER_SIZE_BITS 10
-uint32_t buffer_bus[BUS_BUFFER_SIZE]; //__attribute__((aligned(2*BUS_BUFFER_SIZE)));
+volatile uint32_t buffer_bus[BUS_BUFFER_SIZE]; //__attribute__((aligned(2*BUS_BUFFER_SIZE)));
 uint16_t buffer_bus_read_index = 0;
 
 // DMA IRQ Handler for Bus Interface
@@ -103,11 +105,13 @@ void setup() {
 
   // channel_config_set_ring(&dma_config_bus, true /* write */, BUS_BUFFER_SIZE_BITS);
   
+  buffer_bus[0] = 0;
+
   irq_set_exclusive_handler(DMA_IRQ_0, on_buffer_bus_full);
   irq_set_enabled(DMA_IRQ_0, true);
 
   // dma started
-  dma_channel_configure(dma_channel_bus, &dma_config_bus, buffer_bus, &pio_bus->rxf[sm_bus], BUS_BUFFER_SIZE, true /* start*/); 
+  dma_channel_configure(dma_channel_bus, &dma_config_bus, buffer_bus, &pio_bus->rxf[sm_bus], dma_encode_transfer_count(BUS_BUFFER_SIZE), true /* start*/); 
   #endif
   Serial.println("Bus Interface Initialized");
 
@@ -203,6 +207,10 @@ void processBus(PIO pio, uint sm) {
   while (true) {
     #ifdef USE_BUS_DMA
     uint32_t data = buffer_bus[buffer_bus_read_index];
+    if (data == 0)  { // even a write of 0 at 0xA0000 will have a flag 1 at bit 24, so total 0 means no data
+      continue;
+    }
+    buffer_bus[buffer_bus_read_index] = 0;
     buffer_bus_read_index = (buffer_bus_read_index + 1) % BUS_BUFFER_SIZE;
     #else
     uint32_t data = pio_sm_get_blocking(pio, sm);
@@ -212,7 +220,10 @@ void processBus(PIO pio, uint sm) {
     // ISR = [Address (17) << 8 | Data (8)]
 
     uint8_t value = data & 0xFF;
-    uint32_t full_address = ((data >> 8) & 0x1FFFF) + 0xA0000;
+    uint32_t a16 = ((data >> 8) & 0x1) << 16;
+    uint32_t full_address = (((data >> 9) & 0xFFFF) | a16) + 0xA0000;
+
+    // Serial.printf("Bus Write: Data: 0x%08X, Addr: 0x%05X, Valie: 0x%02X\n", data, full_address, value);
 
     processMemoryBusMessage(full_address, value);
 

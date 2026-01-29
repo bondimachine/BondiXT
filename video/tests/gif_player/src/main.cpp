@@ -2,13 +2,12 @@
 #include <AnimatedGIF.h>
 #include <LittleFS.h>
 #define HALF_CLOCK() __asm ("nop; nop; nop; nop; nop; nop; nop; nop; \
-    nop; nop; nop; nop; nop; nop; nop; nop; \
-    nop; nop; nop; nop; nop; nop; nop; nop; \
     nop; nop; nop; nop; nop; nop; nop; nop;")
 
 // Pin Definitions
 const uint8_t PIN_BUS_BASE = 0; // D0-D15
-const uint8_t PIN_BUS_HIGH = 26; // PI Zero doesn't have 16-25 pins
+const uint8_t PIN_A16 = 15;
+const uint8_t PIN_CLK = 26;
 const uint8_t PIN_CS = 28; // && CLK 
 
 // AnimatedGIF Object
@@ -61,41 +60,39 @@ void bus_write(uint32_t address, uint8_t data) {
     // Serial.println(");");
 
     // t1 low
+    gpio_put(PIN_CLK, 0);
+
     gpio_put_masked(0xFFFF, address);    
-    gpio_put(PIN_BUS_HIGH, (address >> 16) & 0x1);
+    gpio_put(PIN_CS, 0);
+    HALF_CLOCK();
 
     // t1 high
-    gpio_put(PIN_CS, 0);
+    gpio_put(PIN_CLK, 1);
     HALF_CLOCK();
 
+    gpio_put(PIN_CLK, 0);
     // t2 low
-    gpio_put(PIN_CS, 1);
-    HALF_CLOCK();
 
     gpio_put_masked(0xFF, data);
+    gpio_put(PIN_A16, (address >> 16) & 0x1);
+
+    HALF_CLOCK();
 
     // t2 high
-    gpio_put(PIN_CS, 0);
+    gpio_put(PIN_CLK, 1);
     HALF_CLOCK();
 
     // t3 low
-    gpio_put(PIN_CS, 1);
+    gpio_put(PIN_CLK, 0);
     HALF_CLOCK();
 
     // t3 high
-    gpio_put(PIN_CS, 0);
+    gpio_put(PIN_CLK, 1);
     HALF_CLOCK();
 
-    // t4 
+    // t4
     gpio_put(PIN_CS, 1);
 }
-
-void bus_write_important(uint32_t address, uint8_t data) {
-    for(int i = 0; i < 20; i++) {
-        bus_write(address, data);
-    }
-}
-
 
 uint8_t cga_color(uint8_t gif_pixel) {
     // colors are swapped in the palette. I wasted enough time trying to fix it. 
@@ -178,7 +175,7 @@ void GIFDrawVGA12h(GIFDRAW *pDraw) {
 
     int memory_x = x / 8;
     for (int plane = 0; plane < 4; plane++) {
-        bus_write_important(0xB03CF, (1 << plane));
+        bus_write(0xB03CF, (1 << plane));
 
         for (int i = 0; i < width; i+=8, memory_x++) {
             // 8 pixels at a time
@@ -241,9 +238,10 @@ void setup() {
         gpio_set_dir(i, GPIO_OUT);
     }
 
-    // D16
-    gpio_init(PIN_BUS_HIGH);
-    gpio_set_dir(PIN_BUS_HIGH, GPIO_OUT);
+    // CLK
+    gpio_init(PIN_CLK);
+    gpio_set_dir(PIN_CLK, GPIO_OUT);
+    gpio_put(PIN_CLK, 0);
 
     // CS
     gpio_init(PIN_CS);
@@ -345,15 +343,28 @@ void bus_test() {
     delay(1000);    
 }
 
+static uint8_t color = 0;
+void pattern_test() {
+    for (int y = 0; y < 200; y++) {
+        for (int x = 0; x < 320; x++) {
+            uint32_t address = y * 320 + x + 0xA0000;
+            bus_write(address, (x + y + color) % 16);
+        }
+    }
+    color++;
+}
+
 void loop() {
     // play("/stan_cga.gif", GIFDrawCGA);
     // play("/stan_vga.gif", GIFDrawVGA13h);
     #if MAX_WIDTH < 640
         #error "MAX_WIDTH must be at least 640 for VGA test"
     #endif
-    // bus_write_important(0xB03c2, 0xe3);
-    // play("/win31.gif", GIFDrawVGA12h);
-    bus_write_important(0xB03d8, 0b1001);
-    play("/simcity.gif", GIFDrawCGAHiRes);
+    bus_write(0xB03c2, 0xe3);
+    play("/win31.gif", GIFDrawVGA12h);
+    // bus_write(0xB03d8, 0b1010);
+    // play("/simcity.gif", GIFDrawCGAHiRes);
+    // bus_test();
+    // pattern_test();
 }
 

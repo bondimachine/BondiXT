@@ -4,44 +4,50 @@
 ; Implements a write-only interface (ignoring reads for now)
 ;
 ; Protocol:
-; 1. Wait for !CS (Chip Select & Clock)
-; 2. Read 17-bit Address (D0-D17)
-; 3. Wait for !CS up
-; 3. Wait for !CS again (t2)
-; 4. Read 8-bit Data (D0-D7)
-; 5. Push Address and Data to FIFO
-; 6. Skip t3
+; 1. Wait for !CS
+; 2. Wait for CLK up (t1) 
+; 3. Read 16-bit Address (D0-D15)
+; 4. Wait for CLK dn (t2)
+; 5. Wait for CLK up (t2)
+; 6. Read A16 from D15
+; 7. Read 8-bit Data (D0-D7)
+; 8. Push Address and Data to FIFO
+; 6. Wait for CS high
 ;
 ; Pin Mapping Assumption:
 ; - IN pins base is mapped to D0
 ; - CS is 28
+; - CLK is 16
+
+.define CLK 16
+.define CS 28
+
+    set y, 1
 
 .wrap_target
-start:
     ; 1. Wait for !CS
-    wait 0 gpio 28        ; Wait for CS (pin 28 relative to IN base) to be Low
+    wait 0 gpio CS        ; Wait for CS (pin 28 relative to IN base) to be Low
+    wait 1 gpio CLK
 
-    ; 2. Save D0-D16 in addr register (ISR)
-    in pins, 17          ; Shift 17 bits from pins into ISR
+    in y, 1              ; Flag that we have data
+
+    ; 2. Save D0-D15 in addr register (ISR)
+    in pins, 16          ; Shift 17 bits from pins into ISR
 
     ; 3. Wait for t1 to end
-    wait 1 gpio 28
+    wait 0 gpio CLK
 
 
-    ; 3. Wait for t2 to be up (cs low)
-    wait 0 gpio 28
+    ; 3. Wait for t2 to be up
+    wait 1 gpio CLK
+    mov osr, pins
+    out x, 15         ; Discard 14 bits
+    in osr, 1          ; Read A16 from D15
     ; 4. Save D0-D7 to data register (ISR)
     in pins, 8           ; Shift 8 bits from pins into ISR
                          ; ISR now contains [Address (17) << 8| Data (8)]
-
-    ; Wait for t2 to end
-    wait 1 gpio 28
-
-    ; Discarding t3
-    wait 0 gpio 28
-    wait 1 gpio 28
-
-    push block           ; Push ISR to RX FIFO. Clears ISR.
+    push noblock           ; Push ISR to RX FIFO. Clears ISR.
+    wait 1 gpio CS        ; Wait for CS high
 
 
 .wrap
@@ -66,8 +72,10 @@ static inline void bus_program_init(PIO pio, uint sm, uint offset, uint base_pin
 
     pio_sm_set_consecutive_pindirs(pio, sm, 28, 1, false);
 
-    // Shift configuration right and pushing manually
+    // Shift in configuration left and pushing manually
     sm_config_set_in_shift(&c, false, false, 32);
+
+    sm_config_set_out_shift(&c, true, false, 32);
     
     // Join the TX and RX FIFOs into a single 8-word RX FIFO
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
