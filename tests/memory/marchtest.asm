@@ -13,14 +13,13 @@ start:
 ; March C- algorithm {↑ (w0); ↑ (r0, w1); ↑ (r1, w0); ↓ (r0, w1); ↓ (r1, w0); ↓ (r0)}
 
     cli
-    mov bp, 0
-    mov es, bp
+    cld
+    mov bp, 1
+    mov ax, 0
+    mov es, ax
+
     mov ax, cs
     mov ds, ax
-
-    mov dx, 0x378
-    mov al, 0
-    out dx, al
 
     mov al, 1
     mov si, _phase1
@@ -40,16 +39,15 @@ _phase1:
 
 _continue_phase1:
     inc bp
-    cmp bp, 10
+    cmp bp, 11
     je _done_phase1
 
-    mov ax, bp
-    rol ax, 12
+    mov ax, es
+    add ax, 0x1000
     mov es, ax
     jmp _phase1
 
 _done_phase1:
-
 
     mov al, 2
     mov si, _phase2
@@ -127,8 +125,9 @@ success:
     jmp print_success
 
 march_up:
-    mov bp, 0
-    mov es, bp
+    mov bp, 1
+    mov ax, 0
+    mov es, ax
 
 .outer_loop:
 
@@ -139,6 +138,7 @@ march_up:
     mov al, [es:di]
     cmp al, bl
     jne error
+
     mov [es:di], bh
     inc di
     dec cx
@@ -151,11 +151,11 @@ march_up:
 .continue:
 
     inc bp
-    cmp bp, 10
+    cmp bp, 11
     je .done
 
-    mov ax, bp
-    rol ax, 12
+    mov ax, es
+    add ax, 0x1000
     mov es, ax
     jmp .outer_loop
 
@@ -165,9 +165,8 @@ march_up:
 
 
 march_down:
-    mov bp, 9
-    mov ax, bp
-    rol ax, 12
+    mov bp, 10
+    mov ax, 0x9000
     mov es, ax
 
 .outer_loop:
@@ -190,12 +189,12 @@ march_down:
 
 .continue:
 
-    cmp bp, 0
+    cmp bp, 1
     je .done
     dec bp
 
-    mov ax, bp
-    rol ax, 12
+    mov ax, es
+    sub ax, 0x1000
     mov es, ax
     jmp .outer_loop
 
@@ -215,12 +214,8 @@ print_nibble:
     add al, '0'
     jmp print
 
-print_blink0:
+print_blink:
     mov al, '_'
-    jmp print
-
-print_blink1:
-    mov al, '|'
     jmp print
 
 print_error:
@@ -233,24 +228,20 @@ print_success:
 %else 
 
 print_nibble_error:
-    or al, 0x40
+    or al, 0xC0
 print_nibble:
     jmp print
 
-print_blink0:
+print_blink:
     mov al, P0
     jmp print
 
-print_blink1:
-    mov al, P1
-    jmp print
-
 print_error:
-    mov al, 0x40
+    mov al, 0b11000011
     jmp print
 
 print_success:
-    mov al, 0b11000011
+    mov al, 0b11011011
     jmp print
 
 %endif
@@ -306,43 +297,18 @@ print_phase:
 %endif
     mov bl, al
     mov si, .blink0
-    jmp print_blink0
+    jmp print_blink
 .blink0:
     mov si, .wait0
     jmp _wait
 .wait0:
-    mov si, .blink0_1
-    jmp print_blink1
-.blink0_1:
-    mov si, .wait0_1
-    jmp _wait
-.wait0_1:
     mov al, bl
     mov si, .blink1
     jmp print_nibble
 .blink1:
     mov si, .wait1
     jmp _wait
-.wait1:    
-    mov si, .blink2
-    jmp print_blink1
-.blink2:
-    mov si, .wait2
-    jmp _wait
-.wait2:
-    mov al, bl
-    mov si, .blink3
-    jmp print_nibble
-.blink3:    
-    mov si, .wait3
-    jmp _wait
-.wait3:    
-    mov si, .blink4
-    jmp print_blink0
-.blink4:
-    mov si, .wait4
-    jmp _wait
-.wait4:
+.wait1:
     mov si, sp
     jmp si
 
@@ -365,7 +331,8 @@ error:
 .wait1:
     ; es:di failing address
     mov ax, es
-    ror ax, 11
+    mov cl, 11
+    ror ax, cl
     mov si, .blink2
     jmp print_nibble_error
 .blink2:
@@ -375,7 +342,8 @@ error:
     ; es:di failing address
     mov ax, di
     mov al, ah
-    ror al, 4
+    mov cl, 4
+    ror al, cl
     mov si, .blink3
     jmp print_nibble_error
 .blink3:
@@ -410,7 +378,8 @@ error:
     jmp _wait
 .wait6:
     mov al, [es:di]
-    ror al, 4
+    mov cl, 4
+    ror al, cl
     mov si, .blink7
     jmp print_nibble_error
 .blink7:
@@ -419,15 +388,15 @@ error:
 .wait7:
     mov al, [es:di]
     and al, 0x0F
-    mov si, halt
+    mov si, error
     jmp print_nibble_error
 
-halt:    
+halt:
     hlt
 
 reset_vector:
     times 0xFFF0 - ($ - $$) db 0
-    jmp start
+    jmp 0xF000:start
 
 padding: ; 64kb
     times 0x10000 - ($ - $$) db 0

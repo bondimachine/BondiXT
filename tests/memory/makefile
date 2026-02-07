@@ -1,7 +1,7 @@
 # makefile.mak
 
-ASM = basictest.asm
-BIN = basictest.bin
+ASM = marchtest.asm
+BIN = marchtest.bin
 NASM_FLAGS = -O0
 QEMU ?= qemu-system-i386
 
