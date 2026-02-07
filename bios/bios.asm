@@ -124,7 +124,7 @@ boot_message    db "Booting from embedded disk image...", 13, 10, 13, 10, 0
 
 reset_vector:
     times 0xFFF0 - ($ - $$) db 0
-    jmp _start
+    jmp 0xF000:_start
 
 padding: ; 64kb
     times 0x10000 - ($ - $$) db 0

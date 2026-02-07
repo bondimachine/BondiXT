@@ -14,6 +14,7 @@ start:
 
     cli
     cld
+
     mov bp, 1
     mov ax, 0
     mov es, ax
@@ -204,7 +205,6 @@ march_down:
 
 %ifdef QEMU
 ; prints lower 4 bits of al
-print_nibble_error:
 print_nibble:
     and al, 0x0F
     cmp al, 10
@@ -227,8 +227,6 @@ print_success:
     jmp print
 %else 
 
-print_nibble_error:
-    or al, 0xC0
 print_nibble:
     jmp print
 
@@ -237,7 +235,7 @@ print_blink:
     jmp print
 
 print_error:
-    mov al, 0b11000011
+    mov al, 0b11110000
     jmp print
 
 print_success:
@@ -326,44 +324,55 @@ error:
     mov si, .blink1
     jmp print_error
 .blink1:
+    mov si, .wait0
+    jmp _wait
+.wait0:
     mov si, .wait1
     jmp _wait
 .wait1:
     ; es:di failing address
     mov ax, es
-    mov cl, 11
-    ror ax, cl
+    mov cl, 12
+    shr ax, cl
+    or al, 0b00100000
     mov si, .blink2
-    jmp print_nibble_error
+    jmp print_nibble
 .blink2:
     mov si, .wait2
     jmp _wait
 .wait2:
     ; es:di failing address
     mov ax, di
-    mov al, ah
-    mov cl, 4
-    ror al, cl
+    mov cl, 12
+    shr ax, cl
+    and al, 0x0F
+    or al, 0b01000000
     mov si, .blink3
-    jmp print_nibble_error
+    jmp print_nibble
 .blink3:
     mov si, .wait3
     jmp _wait
 .wait3:
     ; es:di failing address
     mov ax, di
-    mov al, ah
+    mov cl, 8
+    shr ax, cl
+    and al, 0x0F
+    or al, 0b01100000
     mov si, .blink4
-    jmp print_nibble_error
+    jmp print_nibble
 .blink4:
     mov si, .wait4
     jmp _wait
 .wait4:
     ; es:di failing address
     mov ax, di
-    ror al, 4
+    mov cl, 4
+    shr al, cl
+    and al, 0x0F
+    or al, 0b10000000
     mov si, .blink5
-    jmp print_nibble_error
+    jmp print_nibble
 .blink5:
     mov si, .wait5
     jmp _wait
@@ -371,25 +380,31 @@ error:
     ; es:di failing address
     mov ax, di
     and al, 0x0F
+    or al, 0b10100000
     mov si, .blink6
-    jmp print_nibble_error
+    jmp print_nibble
 .blink6:
     mov si, .wait6
     jmp _wait
 .wait6:
     mov al, [es:di]
     mov cl, 4
-    ror al, cl
+    shr al, cl
+    or al, 0b11000000
     mov si, .blink7
-    jmp print_nibble_error
+    jmp print_nibble
 .blink7:
     mov si, .wait7
     jmp _wait
 .wait7:
     mov al, [es:di]
     and al, 0x0F
+    or al, 0b11100000
+    mov si, .blink8
+    jmp print_nibble
+.blink8:
     mov si, error
-    jmp print_nibble_error
+    jmp _wait
 
 halt:
     hlt
