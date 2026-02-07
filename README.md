@@ -2,22 +2,23 @@
 
 8088 based computer on a breadboard
 
-## Goals
-
-### Phase 1
+## Features
 
 - Minimal ROM BIOS
-- Console emulation thru serial port using 8251. 
+- Console emulation thru serial port using 8251.
 - Floppy emulation from ROM stored image
-- Boot to DOS 3.3
+- Boots to DOS 3.3 and 5.0 (from ROM)
+- CGA and basic EGA/EGA video output to VGA monitor using a Rapsberry Pi Pico RP2350
+- Glue logic using GAL20V8
+- Poor man's Parallel port using a 74LS377 latch and 74LS245 buffer
+
+### TODO
 - Character attributes support thru ANSI codes
-
-
-### Phase 2
-- Floppy or HDD emulation from SD card directly connected to 8088 bus (even possible?)
-- CGA emulation (or better) via Pi Pico or ESP32 
-- PC Speaker support
-- Keyboard emulation (via Arduino Nano?). Then mouse.
+- More video card stuff, at least VBLANK
+- Test SD card support thru SD.SYS via the parallel port
+- 8253 PIT timer support & PC speaker (either real or emulated) 
+- PIC 8259A interrupt controller (TBD, only if absolutely necessary)
+- Keyboard emulation (via Arduino Nano?). Then mouse (or serial mouse)
 - Run some games!
 
 
