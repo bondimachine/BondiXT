@@ -1,3 +1,4 @@
+CPU 8086
 BITS 16
 
 P0 EQU 0b01010101
@@ -138,8 +139,10 @@ march_up:
 .inner_loop:
     mov al, [es:di]
     cmp al, bl
-    jne error
+    je .no_error
+    jmp error
 
+.no_error:
     mov [es:di], bh
     inc di
     dec cx
@@ -178,7 +181,10 @@ march_down:
 .inner_loop:
     mov al, [es:di]
     cmp al, bl
-    jne error
+    je .no_error
+    jmp error
+
+.no_error:
     mov [es:di], bh
     dec di
     dec cx
