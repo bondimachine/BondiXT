@@ -354,14 +354,35 @@ void pattern_test() {
     color++;
 }
 
+void play_text() {
+    const char *text = "Hola Gaston! Prueba";
+    int len = strlen(text);
+    for (uint8_t line = 0; line < 16; line++) {
+        uint8_t foreground = 0;
+        for (int i = 0; i < len; i++) {
+            bus_write(0xB8000 + (line * 160) + i * 2, text[i]);
+            bus_write(0xB8000 + (line * 160) + i * 2 + 1, (line << 4) | foreground);
+            if (text[i] != ' ') {
+                foreground = (foreground + 1) % 16;
+            }
+        }
+    }
+}
+
 void loop() {
+
+    bus_write(0xB03d8, 0);
+    play_text();
+
+    // play("/simcity.gif", GIFDrawCGAHiRes);
+
     // play("/stan_cga.gif", GIFDrawCGA);
     // play("/stan_vga.gif", GIFDrawVGA13h);
     #if MAX_WIDTH < 640
         #error "MAX_WIDTH must be at least 640 for VGA test"
     #endif
-    bus_write(0xB03c2, 0xe3);
-    play("/win31.gif", GIFDrawVGA12h);
+    // bus_write(0xB03c2, 0xe3);
+    // play("/win31.gif", GIFDrawVGA12h);
     // bus_write(0xB03d8, 0b1010);
     // play("/simcity.gif", GIFDrawCGAHiRes);
     // bus_test();

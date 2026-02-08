@@ -79,9 +79,8 @@ void setup() {
   unsigned int offset_bus = pio_add_program(pio_bus, &bus_program);
   sm_bus = pio_claim_unused_sm(pio_bus, true);
 
-  if (sm_bus == -1) {
+  while (sm_bus < 0) {
     Serial.println("Error: Could not claim State Machine for Bus Interface");
-    return;
   }
 
   bus_program_init(pio_bus, sm_bus, offset_bus, PIN_BUS_BASE);
@@ -89,8 +88,8 @@ void setup() {
   #ifdef USE_BUS_DMA
   // Setup dma for read
   dma_channel_bus = dma_claim_unused_channel(false);
-  if (dma_channel_bus < 0) {
-      panic("No free dma channels");
+  while (dma_channel_bus < 0) {
+      Serial.println("No free dma channels");
   }
   dma_channel_config dma_config_bus = dma_channel_get_default_config(dma_channel_bus);
   channel_config_set_transfer_data_size(&dma_config_bus, DMA_SIZE_32);
@@ -135,8 +134,8 @@ void setup() {
   int rgb_chan_0 = dma_claim_unused_channel(false);
   int rgb_chan_1 = dma_claim_unused_channel(false);
 
-  if (rgb_chan_0 < 0 || rgb_chan_1 < 0) {
-      panic("No free dma channels");
+  while (rgb_chan_0 < 0 || rgb_chan_1 < 0) {
+      Serial.println("No free dma channels");
   }
 
   // Channel Zero (sends color data to PIO VGA machine)
@@ -200,6 +199,11 @@ void setup() {
   dma_start_channel_mask((1u << rgb_chan_0));
 
   Serial.println("VGA Interface Initialized");
+  
+  text_buffer = (uint8_t *)calloc(80 * 25 * 2, 1); // Allocate text buffer for 80x25 characters, 2 bytes each (char + attribute)
+  while (!text_buffer) {
+    Serial.println("Error: Could not allocate text buffer");
+  }
 }
 
 // Process Bus Writes from PIO FIFO

@@ -6,6 +6,8 @@
 unsigned char vga_data_array[FRAME_BUFFER_SIZE];
 unsigned char *address_pointer = &vga_data_array[0];
 
+unsigned char *text_buffer;
+
 // VGA video mode - 0x10 for mode 10h, 0x13 for mode 13h
 uint8_t current_video_mode = 0x13;
 
@@ -56,6 +58,7 @@ const uint8_t CGA_PALETTE4_1[4] = {BLACK, CYAN, MAGENTA,
 
 
 #include "vga_palette.h"
+#include "font.h"
 
 // Current palette selection (0 or 1)
 uint8_t current_palette_idx = 1;
@@ -73,17 +76,7 @@ uint8_t getCGAColor(uint8_t color_idx) {
 // Note that because information is passed to the PIO state machines through
 // a DMA channel, we only need to modify the contents of the array and the
 // pixels will be automatically updated on the screen.
-void drawPixel(int x, int y, uint8_t color) {
-  // Range checks
-  if (x > 639)
-    x = 639;
-  if (x < 0)
-    x = 0;
-  if (y < 0)
-    y = 0;
-  if (y > 479)
-    y = 479;
-
+inline void drawPixel(uint16_t x, uint16_t y, uint8_t color) {
   // Which pixel is it?
   int pixel = ((640 * y) + x);
 
@@ -92,11 +85,9 @@ void drawPixel(int x, int y, uint8_t color) {
 
 void updateCGAByte(uint16_t offset, uint8_t val) {
 
-  // TODO: Support Text (02h)
-
   // Update CGA Memory Byte
   // offset: 0x0000 - 0x3FFF (16KB CGA Memory)
-  // val: 8-bit value containing 4 pixels OR 8 pixels depending on mode
+  // val: 8-bit value containing 4 pixels OR 8 pixels depending on mode, or the text character/attribute in text mode
 
   // CGA Memory Layout:
   // Bank 0 (Even lines): 0x0000 - 0x1FFF
@@ -106,7 +97,31 @@ void updateCGAByte(uint16_t offset, uint8_t val) {
   int cga_y;
   int cga_x_byte;
 
-  if (current_video_mode == 0x6) {
+  if (current_video_mode == 0x2) {
+    // CGA Text Mode: 80x25 characters, each character is 2 bytes (char + attribute)
+    // Each byte represents either the character code or the attribute for a single character cell
+    // We will ignore attributes for now and just render the character glyphs in white
+
+    uint16_t vga_y = (offset / 160) * 16; // Each line has 80 chars * 2 bytes/char = 160 bytes
+    uint16_t vga_x = ((offset % 160) / 2) * 8; // Which character in the line (0-79)
+    bool is_char_byte = (offset % 2 == 0); // Even byte = char code, Odd byte = attribute
+    uint8_t char_code = is_char_byte ? val : text_buffer[offset - 1]; // Get char code from even byte
+    uint8_t attr = is_char_byte ? text_buffer[offset + 1] : val;
+    text_buffer[offset] = val; // Update text buffer with the new value (char or attribute)
+    uint8_t fg = CGA_PALETTE16[attr & 0x0F];
+    uint8_t bg = CGA_PALETTE16[(attr >> 4) & 0x0F];
+
+    // Each character is an 8x16 pixel block
+    for (int row = 0; row < 16; row++) {
+      uint8_t glyph_row = vgafont16[char_code * 16 + row];
+      for (int col = 0; col < 8; col++) {
+        uint8_t pixel_val = (glyph_row >> (7 - col)) & 0b1;
+        uint8_t color = pixel_val ? fg : bg;
+
+        drawPixel(vga_x + col, vga_y + row, color);
+      }
+    }
+  } else if (current_video_mode == 0x6) {
     // CGA Graphics Mode 6: 640x200, 2 colors (1 bit per pixel)
     // Each byte contains 8 pixels: P0 P1 P2 P3 P4 P5 P6 P7 (High bits -> Low bits)
 
