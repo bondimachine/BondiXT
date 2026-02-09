@@ -355,7 +355,7 @@ void pattern_test() {
 }
 
 void play_text() {
-    const char *text = "Hola Gaston! Prueba";
+    const char *text = "Hello from BondiVGA!";
     int len = strlen(text);
     for (uint8_t line = 0; line < 16; line++) {
         uint8_t foreground = 0;

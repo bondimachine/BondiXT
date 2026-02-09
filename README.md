@@ -13,12 +13,11 @@
 - Poor man's Parallel port using a 74LS377 latch and 74LS245 buffer
 
 ### TODO
-- Character attributes support thru ANSI codes
-- More video card stuff, at least VBLANK
 - Test SD card support thru SD.SYS via the parallel port
 - 8253 PIT timer support & PC speaker (either real or emulated) 
 - PIC 8259A interrupt controller (TBD, only if absolutely necessary)
-- Keyboard emulation (via Arduino Nano?). Then mouse (or serial mouse)
+- Keyboard emulation (via Arduino Nano? or separated pi pico). Then mouse (or serial mouse)
+- Video BIOS to support console emulation on the Pico (cursor position, scrolling). Text mode "framebuffer" works already.
 - Run some games!
 
 

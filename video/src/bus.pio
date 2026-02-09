@@ -22,33 +22,56 @@
 .define CLK 16
 .define CS 28
 
-    set y, 1
+    set x, 1           
 
 .wrap_target
     ; 1. Wait for !CS
     wait 0 gpio CS        ; Wait for CS (pin 28 relative to IN base) to be Low
     wait 1 gpio CLK
 
-    in y, 1              ; Flag that we have data
+    in x, 1              ; Flag that we have data
 
     ; 2. Save D0-D15 in addr register (ISR)
     in pins, 16          ; Shift 17 bits from pins into ISR
 
+    mov osr, isr
+    out NULL, 15
+    mov x, osr ; x = A15
+
     ; 3. Wait for t1 to end
     wait 0 gpio CLK
 
-
     ; 3. Wait for t2 to be up
     wait 1 gpio CLK
+
     mov osr, pins
-    out x, 15         ; Discard 14 bits
+    out NULL, 15         ; Discard 14 bits
     in osr, 1          ; Read A16 from D15
+
     ; 4. Save D0-D7 to data register (ISR)
     in pins, 8           ; Shift 8 bits from pins into ISR
                          ; ISR now contains [Address (17) << 8| Data (8)]
-    push noblock           ; Push ISR to RX FIFO. Clears ISR.
-    wait 1 gpio CS        ; Wait for CS high
+                         ; Also it is autopushed to RX FIFO
 
+
+    jmp x-- wait_cs_up ; if A15>0, then it is memory access, otherwise check A16
+    mov x, osr ; x = A16
+    jmp !x wait_cs_up; if !A16, it is memory in A0000, otherwise it is B0000 which is port access
+
+    ; this is ultra crappy, but given we already saved the value, we can drive the bus
+    ; and set the pins to support a read in port 0x3da. This is because we cannot 
+    ; just compare the value with 0x3da :-S
+    ; and yeah, we just fake the VSYNC. 
+
+    set pindirs, 0b1000 ; bit 3 is output
+    set pins, 0b1000 ; set D3 high (VSYNC)
+
+    wait 0 gpio CLK
+
+    set pindirs, 0
+
+wait_cs_up:
+    wait 1 gpio CS        ; Wait for CS high
 
 .wrap
 
@@ -58,6 +81,8 @@ static inline void bus_program_init(PIO pio, uint sm, uint offset, uint base_pin
 
     // Map the state machine's IN pin group to D0..D16
     sm_config_set_in_pins(&c, base_pin);
+
+    sm_config_set_out_pins(&c, base_pin, 8);
 
     // Set this pin's GPIO function (connect PIO to the pad)
     // Initialize all 17 pins (D0-D16)
@@ -72,8 +97,8 @@ static inline void bus_program_init(PIO pio, uint sm, uint offset, uint base_pin
 
     pio_sm_set_consecutive_pindirs(pio, sm, 28, 1, false);
 
-    // Shift in configuration left and pushing manually
-    sm_config_set_in_shift(&c, false, false, 32);
+    // Shift in configuration left and auto push with 25 bits
+    sm_config_set_in_shift(&c, false, true, 25);
 
     sm_config_set_out_shift(&c, true, false, 32);
     
