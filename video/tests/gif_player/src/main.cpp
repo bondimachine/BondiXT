@@ -369,10 +369,98 @@ void play_text() {
     }
 }
 
+void play_ansi(const char *szFilename) {
+    File f = LittleFS.open(szFilename, "r");
+    if (!f) {
+        Serial.println("Error opening ANSI file");
+        return;
+    }
+    Serial.println("ANSI File Opened");
+
+    uint16_t x = 0, y = 0;
+    uint8_t color = 0x07; // Default white on black
+    while (f.available()) {
+        char c = f.read();
+        if (c == '\n') {
+            y++;
+            x = 0;
+        } else if (c == '\r') {
+            x = 0;
+        } else if (c == 0x1B) { // Escape sequence
+            // Handle ANSI escape sequences
+            char next = f.read();
+            if (next == '[') {
+                // Parse ANSI sequence
+                String param = "";
+                while (f.available()) {
+                    char c = f.read();
+                    if (c == 'H') {
+                        // Cursor Home or Move: ESC[y;xH
+                        int semi = param.indexOf(';');
+                        if (semi > 0) {
+                            y = param.substring(0, semi).toInt();
+                            x = param.substring(semi + 1).toInt();
+                        } else {
+                            y = 0;
+                            x = 0;
+                        }
+                        break;
+                    } else if (c == 'm') {
+                        int color_code = param.toInt();
+                        if ((color_code == 38 || color_code == 48) && param.indexOf(";5;") != -1) {
+                            int n = param.substring(param.lastIndexOf(';') + 1).toInt();
+                            uint8_t m = (n < 16) ? n : (n >= 232 ? (n < 244 ? 8 : 7) : 
+                                (((n - 16) / 36 / 3) | ((n - 16) / 6 % 6 / 3 << 1) | ((n - 16) % 6 / 3 << 2)));
+                            if (color_code == 38) {
+                                color = (color & 0xF0) | m;
+                            } else {
+                                color = (m << 4) | (color & 0x0F);
+                            }
+                        } else if (color_code == 0) {
+                            // Reset to default
+                            color = 0x07;
+                        } else if (color_code >= 30 && color_code <= 37) {
+                            // Foreground colors
+                            uint8_t cga_color = color_code - 30;
+                            color = (color & 0xF0) | cga_color;
+                        } else if (color_code == 39) {
+                            color = (color & 0xF0) | 0x07; // Default foreground
+                        } else if (color_code >= 90 && color_code <= 97) {
+                            // High intensity foreground colors
+                            uint8_t cga_color = color_code - 90;
+                            color = (color & 0xF0) | 0x08 | cga_color;
+                        } else if (color_code >= 40 && color_code <= 47) {
+                            // Background colors
+                            uint8_t cga_color = color_code - 40;
+                            color = (cga_color << 4) | (color & 0x0F);
+                        } else if (color_code == 49) {
+                            color = (color & 0x0F); // default background
+                        } else if (color_code >= 100 && color_code <= 107) {
+                            // High intensity background colors
+                            uint8_t cga_color = color_code - 100;
+                            color = ((cga_color | 0x08) << 4) | (color & 0x0F);
+                        }
+                        break;
+                    } else if (isdigit(c) || c == ';') {
+                        param += c;
+                    } else {
+                        break;
+                    }
+                }
+            }
+        } else {
+            bus_write(0xB8000 + (y * 160) + x * 2, c);
+            bus_write(0xB8000 + (y * 160) + x * 2 + 1, color);
+            x++;
+        }
+    }
+    f.close();
+}
+
 void loop() {
 
     bus_write(0xB03d8, 0);
-    play_text();
+    play_ansi("/rick_short.ans");
 
     // play("/simcity.gif", GIFDrawCGAHiRes);
 
