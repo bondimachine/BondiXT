@@ -1,3 +1,6 @@
+init_video:
+    ret
+
 int10_handler:
     pusha
 

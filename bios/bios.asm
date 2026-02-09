@@ -65,6 +65,9 @@ _start:
     mov si, welcome_message
     call serial_print_string
 
+    ; intialize video
+    call init_video
+
     mov ax, 0
     mov es, ax
 

@@ -1,9 +1,102 @@
 DATA_AREA_VIDEO_MODE EQU 0x49
 
-; set default video mode to 80x25 color text mode
-mov ax, 0x40
-mov es, ax
-mov byte [es:DATA_AREA_VIDEO_MODE], 0x03
+init_video:
+    ; set default video mode to 80x25 color text mode
+    mov ax, 0x40
+    mov es, ax
+    mov byte [es:DATA_AREA_VIDEO_MODE], 0x03
+
+;     mov dx, 0x3da
+;     in al, dx ; reset the flip-flop by reading the input status register
+
+;     mov dx, 0x3c0
+;     mov si, atc80x25
+;     mov cx, 20
+;     xor bl, bl
+;     cld
+; .next_reg_atc:
+;     mov al, bl
+;     out dx, al
+;     lodsb
+;     out dx, al
+;     inc bl
+;     loop .next_reg_atc
+
+; ; idk why people doesn't just include the 0x14 register in the atc80x25 array, but whatever, let's just write it here
+;     mov al, 0x14
+;     out dx, al
+;     mov al, 0x00 ; disable overscan color (set to black)
+;     out dx, al
+
+;     mov  dx, 0x3c4
+;     mov  ax, 0x0300
+;     out  dx, ax
+  
+;     mov si, sequ80x25
+;     mov cx, 4
+;     xor bl, bl
+;     cld
+; .next_reg_sequ:
+;     lodsb
+;     mov ah, al
+;     mov al, bl
+;     out dx, ax
+;     inc bl
+;     loop .next_reg_sequ
+
+;     mov dx, 0x3ce
+;     mov si, grdc80x25
+;     mov cx, 9
+;     xor bl, bl
+;     cld
+; .next_reg_grdc:
+;     lodsb
+;     mov ah, al
+;     mov al, bl
+;     out dx, ax
+;     inc bl
+;     loop .next_reg_grdc
+
+;     mov dx, 0x3c2
+;     mov al, 0x67 
+;     out dx, al
+    
+;     mov dx, 0x3D4
+;     mov ax, 0x0011
+;     out dx, ax
+
+;     mov si, crtc80x25
+;     mov cx, 0x19
+;     xor bl, bl
+; .next_reg:
+;     lodsb
+;     mov ah, al
+;     mov al, bl
+;     out dx, ax
+;     inc bl
+;     loop .next_reg
+
+;     mov dx, 0x3c0
+;     mov al, 0x20 ; unblank the screen
+;     out dx, al
+
+;     ; set font
+
+;     xor ax, ax
+;     mov es, ax
+;     mov bx, 0x2596 ; offset of the 8x16 font in the bios rom
+;     mov ax, 0xc000
+;     mov  [es:0x010c], bx ;; INT 0x43
+;     mov  [es:0x010e], ax
+
+;     mov ax, 0xb800
+;     mov es, ax
+;     xor di, di
+;     mov cx, 8
+;     rep stosw
+
+    ret
+
 
 int10_handler:
     pusha
@@ -153,3 +246,18 @@ int10_handler:
 .done:
     popa
     iret
+
+; atc80x25:
+;     db 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x14, 0x07, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 0x0c, 0x00, 0x0f, 0x08
+
+; sequ80x25:
+;     db 0x00, 0x03, 0x00, 0x02
+
+; crtc80x25:
+; 	db 0x5f, 0x4f, 0x50, 0x82, 0x55, 0x81, 0xbf, 0x1f, 0x00, 0x4f, 0x0d, 0x0e, 0x00, 0x00, 0x00, 0x00, 0x9c, 0x8e, 0x8f, 0x28, 0x1f, 0x96, 0xb9, 0xa3, 0xff
+
+; grdc80x25:
+;     db 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x0e, 0x0f, 0xff
+
+; hello:
+;     db 0x07, 'B', 0x07, 'o', 0x07, 'n', 0x07, 'd', 0x07, 'i', 0x07, 'V', 0x07, 'G', 0x07, 'A'

@@ -26,7 +26,8 @@ clean:
 	rm -f $(BIN) $(BIN).elf $(BIN).truncated rom.bin
 
 run: rom
-	$(QEMU) -bios rom.bin -serial stdio
+	$(QEMU) -bios rom.bin -serial stdio -device isa-vga
+
 
 debug: $(BIN).elf
-	$(QEMU) -bios rom.bin -serial stdio -s -S
+	$(QEMU) -bios rom.bin -serial stdio -device isa-vga -s -S
