@@ -59,13 +59,13 @@
     jmp !x wait_cs_up; if !A16, it is memory in A0000, otherwise it is B0000 which is port access
 
     ; this is ultra crappy, but given we already saved the value, we can drive the bus
-    ; and set the pins to support a read in port 0x3da. This is because we cannot 
-    ; just compare the value with 0x3da :-S
-    ; and yeah, we just fake the VSYNC. 
+    ; and set the pins to support a potential read in port 0x3da. 
 
-    set pindirs, 0b1000 ; bit 3 is output
-    set pins, 0b1000 ; set D3 high (VSYNC)
+    irq 1
 
+    wait 0 gpio CLK
+
+    wait 1 gpio CLK
     wait 0 gpio CLK
 
     set pindirs, 0

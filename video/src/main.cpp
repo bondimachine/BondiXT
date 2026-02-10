@@ -47,6 +47,9 @@ const uint8_t PIN_VGA_RGB_BASE = 17; // R, R+, G, G+, B, B+ (6 pins)
 PIO pio_bus = pio0;
 int sm_bus = -1;
 
+// Using PIO1 for VGA signals to keep them separate and avoid contention
+PIO pio_vga = pio1;
+
 #define USE_BUS_DMA
 
 #ifdef USE_BUS_DMA
@@ -65,6 +68,19 @@ void on_buffer_bus_full() {
 }
 
 #endif
+
+void io_isr(void) {
+  // for the moment the only possible thing to read is VSYNC
+  pio_bus->irq = 1 << 1; // Clear the interrupt
+  gpio_set_dir(3, GPIO_OUT);
+  gpio_put(3, vsync_flag);
+}
+
+void vsync_isr(void) {
+  pio_vga->irq = 1 << 2; // Clear the interrupt
+  vsync_flag = true;
+}  
+
 
 void demo(int color);
 
@@ -107,16 +123,22 @@ void setup() {
   buffer_bus[0] = 0;
 
   irq_set_exclusive_handler(DMA_IRQ_0, on_buffer_bus_full);
+  irq_set_priority(DMA_IRQ_0, PICO_HIGHEST_IRQ_PRIORITY);
   irq_set_enabled(DMA_IRQ_0, true);
 
   // dma started
   dma_channel_configure(dma_channel_bus, &dma_config_bus, buffer_bus, &pio_bus->rxf[sm_bus], dma_encode_transfer_count(BUS_BUFFER_SIZE), true /* start*/); 
   #endif
+
+  irq_set_enabled(PIO0_IRQ_1, false);
+  irq_set_priority(PIO0_IRQ_1, PICO_HIGHEST_IRQ_PRIORITY+1);
+  pio_set_irq1_source_enabled(pio0, pis_interrupt1, true);
+  irq_set_exclusive_handler(PIO0_IRQ_1, io_isr);
+  irq_set_enabled(PIO0_IRQ_1, true);
+
   Serial.println("Bus Interface Initialized");
 
   // --- VGA Initialization ---
-  // Using PIO1 for VGA signals to keep them separate and avoid contention
-  PIO pio_vga = pio1;
 
   uint hsync_offset = pio_add_program(pio_vga, &hsync_program);
   uint vsync_offset = pio_add_program(pio_vga, &vsync_program);
@@ -197,6 +219,12 @@ void setup() {
   // To change the contents of the screen, we need only change the contents
   // of that array.
   dma_start_channel_mask((1u << rgb_chan_0));
+
+  irq_set_enabled(PIO1_IRQ_1, false);
+  irq_set_priority(PIO1_IRQ_1, PICO_DEFAULT_IRQ_PRIORITY);
+  pio_set_irq1_source_enabled(pio1, pis_interrupt2, true);
+  irq_set_exclusive_handler(PIO1_IRQ_1, vsync_isr);
+  irq_set_enabled(PIO1_IRQ_1, true);
 
   Serial.println("VGA Interface Initialized");
   

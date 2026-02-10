@@ -23,14 +23,14 @@ activefront:
     jmp x-- activefront           ; Remain in active mode, decrementing counter
 
 ; FRONTPORCH
+irq 2
 set y, 9                          ;
 frontporch:
     wait 1 irq 0                  ;
     jmp y-- frontporch            ;
 
 ; SYNC PULSE
-set pins, 0                       ; Set pin low
-wait 1 irq 0                      ; Wait for one line
+wait 1 irq 0 side 0               ; Wait for one line
 wait 1 irq 0                      ; Wait for a second line
 
 ; BACKPORCH
@@ -39,8 +39,6 @@ set y, 31                         ; First part of back porch into y scratch regi
 backporch:
     wait 1 irq 0   side 1         ; Wait for hsync to go high - SIDESET REPLACEMENT HERE
     jmp y-- backporch             ; Remain in backporch, decrementing counter
-
-;wait 1 irq 0                      ; Wait for final (33rd) backporch line (eliminated)
 
 .wrap                             ; Program wraps from here
 
