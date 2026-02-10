@@ -271,10 +271,6 @@ void processIO(uint16_t address, uint8_t value) {
       // CGA Color control register
       current_palette_idx = (value & 0x10);
       break;
-    case 0x3da:
-      // borrowed this idea from the PPU, clear the vsync once we read it
-      vsync_flag = false;
-      break;  
     case 0x3C2: // Miscellaneous Output Register
       // this is really crappy, but kinda works
       if (value == 0xa3) {

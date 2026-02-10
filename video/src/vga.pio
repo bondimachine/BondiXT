@@ -17,13 +17,13 @@ pull block                        ; Pull from FIFO to OSR (only once)
 
 ; ACTIVE
 mov x, osr                        ; Copy value from OSR to x scratch register
+irq 2
 activefront:
     wait 1 irq 0                  ; Wait for hsync to go high
     irq 1                         ; Signal that we're in active mode
     jmp x-- activefront           ; Remain in active mode, decrementing counter
 
 ; FRONTPORCH
-irq 2
 set y, 9                          ;
 frontporch:
     wait 1 irq 0                  ;

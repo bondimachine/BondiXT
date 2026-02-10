@@ -69,6 +69,12 @@ void on_buffer_bus_full() {
 
 #endif
 
+int rgb_chan_0 = -1;
+void rgb_dma_isr() {
+  dma_hw->ints0 = 1u << rgb_chan_0;
+  vsync_flag = true;
+}
+
 void io_isr(void) {
   // for the moment the only possible thing to read is VSYNC
   pio_bus->irq = 1 << 1; // Clear the interrupt
@@ -78,7 +84,7 @@ void io_isr(void) {
 
 void vsync_isr(void) {
   pio_vga->irq = 1 << 2; // Clear the interrupt
-  vsync_flag = true;
+  vsync_flag = false;
 }  
 
 
@@ -99,6 +105,7 @@ void setup() {
     Serial.println("Error: Could not claim State Machine for Bus Interface");
   }
 
+  gpio_init(3);
   bus_program_init(pio_bus, sm_bus, offset_bus, PIN_BUS_BASE);
 
   #ifdef USE_BUS_DMA
@@ -153,7 +160,7 @@ void setup() {
   rgb_program_init(pio_vga, rgb_sm, rgb_offset, PIN_VGA_RGB_BASE);
 
   // DMA channels - 0 sends color data, 1 reconfigures and restarts 0
-  int rgb_chan_0 = dma_claim_unused_channel(false);
+  rgb_chan_0 = dma_claim_unused_channel(false);
   int rgb_chan_1 = dma_claim_unused_channel(false);
 
   while (rgb_chan_0 < 0 || rgb_chan_1 < 0) {
@@ -178,6 +185,11 @@ void setup() {
       false    // Don't start immediately.
   );
 
+  dma_channel_set_irq1_enabled(rgb_chan_0, true);
+  irq_set_exclusive_handler(DMA_IRQ_1, rgb_dma_isr);
+  irq_set_priority(DMA_IRQ_1, PICO_HIGHEST_IRQ_PRIORITY);
+  irq_set_enabled(DMA_IRQ_1, true);
+  
   // Channel One (reconfigures the first channel)
   dma_channel_config c1 =
       dma_channel_get_default_config(rgb_chan_1);          // default configs
