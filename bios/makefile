@@ -15,6 +15,18 @@ rom: $(BIN) disk.bin
 	truncate -s 124kb disk.bin.truncated
 	cat disk.bin.truncated $(BIN).truncated > rom.bin
 
+
+rom8k: $(BIN) disk.bin
+	# Bottom 4kb
+	dd if=$(BIN) of=$(BIN).truncated bs=1 skip=61440 
+	cp disk.bin disk.bin.truncated
+	truncate -s 4kb disk.bin.truncated
+	touch empty.bin
+	truncate -s 120kb empty.bin
+	cat disk.bin.truncated $(BIN).truncated > rom8k.bin
+	cat empty.bin disk.bin.truncated $(BIN).truncated > rom8k.bin.extended
+	
+
 $(BIN): $(ASM) serial.asm video_serial.asm keyboard_serial.asm disk_embedded.asm config.serial.inc video_custom.asm
 	nasm $(NASM_FLAGS) -f bin -o $(BIN) $(ASM)
 
@@ -27,6 +39,10 @@ clean:
 
 run: rom
 	$(QEMU) -bios rom.bin -serial stdio -device isa-vga
+
+
+run8k: rom8k
+	$(QEMU) -bios rom8k.bin.extended -serial stdio -device isa-vga
 
 
 debug: $(BIN).elf

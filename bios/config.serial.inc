@@ -6,4 +6,4 @@ SERIAL_PORT_LSR        EQU SERIAL_PORT + 5       ; Line Status Register
 SERIAL_PORT_DIV_LOW    EQU SERIAL_PORT + 0       ; Divisor Latch Low Byte (when DLAB=1)
 SERIAL_PORT_DIV_HIGH   EQU SERIAL_PORT + 1       ; Divisor Latch High Byte (when DLAB=1)
 
-SERIAL_PORT_BAUD_DIVISOR    EQU 1 ; 115200
+SERIAL_PORT_BAUD_DIVISOR    EQU 12 ; 9600

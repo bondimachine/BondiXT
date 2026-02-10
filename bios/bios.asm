@@ -1,7 +1,9 @@
 %include "config.serial.inc"
 BITS 16
 
-DISK_IMAGE_SEGMENT equ 0xE000 ; 0xE0000 / 16
+; DISK_IMAGE_SEGMENT equ 0xE000 ; 0xE0000 / 16
+
+DISK_IMAGE_SEGMENT equ 0xFE00 ; 8 kb rom
 
 times 0xF000 - ($ - $$) db 0 ; BIOS code starts at 0xF000 
 
@@ -9,6 +11,11 @@ _start:
     cli                   ; disable interrupts during setup
     push cs
     pop ds
+
+    ; poorman's POST code
+    mov dx, 0x378
+    mov al, 0b11000011
+    out dx, al
 
     xor ax, ax
     mov es, ax            ; ES = 0
@@ -87,6 +94,10 @@ _start:
 
     xor ax, ax
     mov ds, ax            ; DS = 0
+
+    mov dx, 0x378
+    mov al, 0b11011011
+    out dx, al
 
     ; jump to 0x7C00 (boot sector)
     jmp 0x0000:0x7C00
