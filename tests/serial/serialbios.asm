@@ -9,81 +9,61 @@ start:
     mov es, ax
 
 
-    call serial_init
-
     mov dx, 0x378
     mov al, 0b11000011
     out dx, al
 
-continue:    
 
-    mov dx, 0x3F8
+    call serial_init
 
-    mov al, 'H'
-    out dx, al
+    mov si, prompt
+    call serial_print_string       
 
-    mov bx, 0
-_wait0:
-    inc bx; 3
-    cmp bx, 0xFFFF; 4
-    jb _wait0; 16
-
-    mov al, 'o'
-    out dx, al
-
-    mov bx, 0
-_wait1:
-    inc bx; 3
-    cmp bx, 0xFFFF; 4
-    jb _wait1; 16
-
-    mov al, 'l'
-    out dx, al
-
-    mov bx, 0
-_wait2:
-    inc bx; 3
-    cmp bx, 0xFFFF; 4
-    jb _wait2; 16
-
-    mov al, 'a'
-    out dx, al
-
-    mov bx, 0
-_wait3:
-    inc bx; 3
-    cmp bx, 0xFFFF; 4
-    jb _wait3; 16
-
-    mov al, 13
-    out dx, al
-
-    mov bx, 0
-_wait4:
-    inc bx; 3
-    cmp bx, 0xFFFF; 4
-    jb _wait4; 16
-
-    mov al, 10
-    out dx, al
 
     mov dx, 0x378
     mov al, 0b11011011
     out dx, al
 
-    mov bx, 0
-_wait5:
-    inc bx; 3
-    cmp bx, 0xFFFF; 4
-    jb _wait5; 16
+    ; we are running in ROM, so we need the buffer to be in RAM
+    mov ax, 0x1000
+    mov ds, ax
+    mov si, 0         
+    mov cx, NAME_MAX
+    call serial_readline     
+    mov ax, cs
+    mov ds, ax
 
+    mov si, cr_lf
+    call serial_print_string
+    mov si, hola_prefix
+    call serial_print_string
 
-    jmp continue
+    mov ax, 0x1000
+    mov ds, ax
+    mov si, 0
+    call serial_print_string
+    mov ax, cs
+    mov ds, ax
+
+    mov si, cr_lf
+    call serial_print_string
+
+    jmp start
 
 %include "../../bios/config.serial.inc"
 %include "../../bios/serial.asm"
 %include "../../bios/serial_util.asm"
 
+; ---------------------
+; Data area / padding
+; ---------------------
+
+prompt db 'Nombre: ',0
+
+NAME_MAX equ 20
+
+hola_prefix db 'Hola ',0
+cr_lf db 13,10,0
 
 reset_vector:
     times 0xFFF0 - ($ - $$) db 0
