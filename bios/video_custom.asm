@@ -99,7 +99,10 @@ init_video:
 
 
 int10_handler:
-    pusha
+    push cx
+    push dx
+    push si
+    push es
 
     cmp ah, 0x00         
     je .set_video_mode
@@ -244,7 +247,10 @@ int10_handler:
     jmp .done
 
 .done:
-    popa
+    pop es
+    pop si
+    pop dx
+    pop cx
     iret
 
 ; atc80x25:

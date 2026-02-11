@@ -24,7 +24,7 @@ clean:
 	rm -f $(BIN) $(BIN).elf $(BIN).truncated $(BIN).truncated8k
 
 run: rom
-	$(QEMU) -bios $(BIN) -parallel stdio
+	$(QEMU) -bios $(BIN) -device isa-debugcon,iobase=0x378,chardev=debug -chardev stdio,id=debug,mux=on
 
 debug: $(BIN).elf
-	$(QEMU) -bios $(BIN) -parallel stdio -s -S
+	$(QEMU) -bios $(BIN) -device isa-debugcon,iobase=0x378,chardev=debug -chardev stdio,id=debug,mux=on -s -S

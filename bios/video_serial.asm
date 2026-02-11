@@ -2,7 +2,9 @@ init_video:
     ret
 
 int10_handler:
-    pusha
+    push cx
+    push dx
+    push si
 
     cmp ah, 0x0e          
     je .teletype_output
@@ -24,5 +26,7 @@ int10_handler:
     jmp .done
 
 .done:
-    popa
+    pop si
+    pop dx
+    pop cx
     iret

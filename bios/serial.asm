@@ -2,7 +2,10 @@
 ; INT 14h - Serial Port Services
 ; =============================================================================
 int14_handler:
-    pusha
+    push bx
+    push cx
+    push dx
+    push si
     
     ; We only support COM1 (DX=0)
     cmp dx, 0
@@ -52,9 +55,10 @@ int14_handler:
     mov ah, 0x80
     
 .done:
-    mov byte [bp-9], ah ; Set AH in stacked registers
-    mov byte [bp-10], al ; Set AL in stacked registers
-    popa
+    pop si
+    pop dx
+    pop cx
+    pop bx
     iret
 
 .do_get_status:

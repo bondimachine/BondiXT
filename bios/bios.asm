@@ -1,20 +1,25 @@
 %include "config.serial.inc"
 BITS 16
+CPU 8086
 
 ; DISK_IMAGE_SEGMENT equ 0xE000 ; 0xE0000 / 16
 
 DISK_IMAGE_SEGMENT equ 0xFE00 ; 8 kb rom
 
+POST_ADDRESS equ 0x378 ; parallel port for POST code output until we move it to 0x80
+
 times 0xF000 - ($ - $$) db 0 ; BIOS code starts at 0xF000 
 
 _start:
     cli                   ; disable interrupts during setup
-    push cs
-    pop ds
+    mov ax, cs
+    mov ds, ax            ; DS = CS
+    xor ax, ax
+    mov ss, ax            ; SS
+    mov sp, 0xFFFE       ; set up stack at the end of the segment 
 
-    ; poorman's POST code
-    mov dx, 0x378
-    mov al, 0b11000011
+    mov dx, POST_ADDRESS
+    mov al, 0b11000001
     out dx, al
 
     xor ax, ax
@@ -67,6 +72,11 @@ _start:
 
     sti                   ; enable interrupts again
 
+
+    mov dx, POST_ADDRESS
+    mov al, 0b11000010
+    out dx, al
+
     call serial_init
     
     mov si, welcome_message
@@ -77,6 +87,10 @@ _start:
 
     mov ax, 0
     mov es, ax
+
+    mov dx, POST_ADDRESS
+    mov al, 0b11000011
+    out dx, al
 
     ; copy the boot sector to 0x7C00
     mov ah, 02h
@@ -89,13 +103,17 @@ _start:
     push cs
     pop ds
 
+    mov dx, POST_ADDRESS
+    mov al, 0b11000100
+    out dx, al
+
     mov si, boot_message
     call serial_print_string
 
     xor ax, ax
     mov ds, ax            ; DS = 0
 
-    mov dx, 0x378
+    mov dx, POST_ADDRESS
     mov al, 0b11011011
     out dx, al
 
@@ -105,8 +123,8 @@ _start:
 
 %include "serial.asm"
 %include "serial_util.asm"
-; %include "video_serial.asm"
-%include "video_custom.asm"
+%include "video_serial.asm"
+; %include "video_custom.asm"
 %include "keyboard_serial.asm"
 %include "disk_embedded.asm"
 

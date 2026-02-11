@@ -37,12 +37,13 @@ $(BIN).elf: rom
 clean:
 	rm -f $(BIN) $(BIN).elf $(BIN).truncated rom.bin
 
+
+# -serial chardev:debug -device isa-debugcon,iobase=0x378,chardev=debug -chardev stdio,id=debug,mux=on
 run: rom
 	$(QEMU) -bios rom.bin -serial stdio -device isa-vga
 
-
 run8k: rom8k
-	$(QEMU) -bios rom8k.bin.extended -serial stdio -device isa-vga
+	$(QEMU) -bios rom8k.bin.extended -serial stdio -device isa-vga 
 
 
 debug: $(BIN).elf

@@ -59,7 +59,8 @@ serial_print_hex:
     push bx
     push cx
     mov bl, al
-    shr al, 4
+    mov cl, 4
+    shr al, cl
     call .print_nibble
 
     mov al, bl

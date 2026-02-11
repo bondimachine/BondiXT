@@ -4,6 +4,7 @@ BITS 16
 P0 EQU 0b01010101
 P1 EQU 0b10101010
 
+POST_PORT equ 0x378
 ; %define QEMU
 
 times 0xE000 - ($ - $$) db 0 ; put the code in the last 8kb
@@ -253,39 +254,8 @@ print_success:
 
 ; destroys si, dx, al
 print:
-    mov dx, 0x378
+    mov dx, POST_PORT
     out dx, al
-
-%ifdef QEMU
-    ; this is only needed for QEMU to print on the screen
-    mov dx, 0x37A
-    mov al, 0x08 | 0x04 | 1 ; 0x08 = select, 0x04 = !initialize, 1 = strobe
-    out dx, al
-    mov al, 0x08 | 0x04
-    out dx, al
-
-    mov al, 13
-    mov dx, 0x378
-    out dx, al
-
-    mov dx, 0x37A
-    mov al, 0x08 | 0x04 | 1 ; 0x08 = select, 0x04 = !initialize, 1 = strobe
-    out dx, al
-    mov al, 0x08 | 0x04
-    out dx, al
-
-
-    mov al, 10
-    mov dx, 0x378
-    out dx, al
-
-    mov dx, 0x37A
-    mov al, 0x08 | 0x04 | 1 ; 0x08 = select, 0x04 = !initialize, 1 = strobe
-    out dx, al
-    mov al, 0x08 | 0x04
-    out dx, al
-%endif
-
     jmp si
 
 ; prints al (as a character) to parallel port 0x378 with wait/blink

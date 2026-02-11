@@ -1,5 +1,7 @@
 BITS 16
 
+POST_PORT equ 0x378
+
 times 0xE000 - ($ - $$) db 0 ; put the code in the last 8kb
 
 start:
@@ -9,7 +11,7 @@ start:
     mov es, ax
 
 
-    mov dx, 0x378
+    mov dx, POST_PORT
     mov al, 0b11000011
     out dx, al
 
@@ -20,7 +22,7 @@ start:
     call serial_print_string       
 
 
-    mov dx, 0x378
+    mov dx, POST_PORT
     mov al, 0b11011011
     out dx, al
 

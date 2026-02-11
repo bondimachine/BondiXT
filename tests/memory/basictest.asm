@@ -3,6 +3,7 @@ BITS 16
 P0 EQU 0b01010101
 P1 EQU 0b10101010
 
+POST_PORT equ 0x378
 ; %define QEMU
 
 times 0xE000 - ($ - $$) db 0 ; put the code in the last 8kb
@@ -14,7 +15,7 @@ start:
     mov si, 0
     mov cl, 1
 
-    mov dx, 0x378
+    mov dx, POST_PORT
     mov al, cl
     out dx, al
 
@@ -46,15 +47,6 @@ continue:
 %endif
     out dx, al
 
-%ifdef QEMU
-    mov dx, 0x37A
-    mov al, 0x08 | 0x04 | 1 ; 0x08 = select, 0x04 = !initialize, 1 = strobe
-    out dx, al
-    mov al, 0x08 | 0x04
-    out dx, al
-    mov dx, 0x378
-%endif
-
     jmp continue
 
 error:
@@ -66,15 +58,6 @@ error:
 %endif
     out dx, al
 
-%ifdef QEMU
-    mov dx, 0x37A
-    mov al, 0x08 | 0x04 | 1 ; 0x08 = select, 0x04 = !initialize, 1 = strobe
-    out dx, al
-    mov al, 0x08 | 0x04
-    out dx, al
-    mov dx, 0x378
-%endif
-
     hlt
 
 done:
@@ -84,15 +67,6 @@ done:
     mov al, 0b11011011
 %endif
     out dx, al
-
-%ifdef QEMU
-    mov dx, 0x37A
-    mov al, 0x08 | 0x04 | 1 ; 0x08 = select, 0x04 = !initialize, 1 = strobe
-    out dx, al
-    mov al, 0x08 | 0x04
-    out dx, al
-    mov dx, 0x378
-%endif
 
     hlt
 

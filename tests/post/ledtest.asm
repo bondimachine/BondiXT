@@ -1,5 +1,6 @@
 BITS 16
 
+POST_PORT equ 0x378
 times 0xE000 - ($ - $$) db 0 ; put the code in the last 8kb
 
 _start:
@@ -8,17 +9,10 @@ _start:
 
 _continue:
 
-    mov dx, 0x378
+    mov dx, POST_PORT
     mov al, cl
 
     out dx, al
-
-    ; this is only needed for QEMU to print on the screen
-    ; mov dx, 0x37A
-    ; mov al, 0x08 | 0x04 | 1 ; 0x08 = select 0x04 = !intialize and 1 = strobe
-    ; out dx, al
-    ; mov al, 0x08 | 0x04
-    ; out dx, al
 
     mov bx, 0
 _wait:
