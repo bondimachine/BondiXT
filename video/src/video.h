@@ -84,6 +84,22 @@ inline void drawPixel(uint16_t x, uint16_t y, uint8_t color) {
   vga_data_array[pixel] = color;
 }
 
+inline void render_char(uint16_t vga_x, uint16_t vga_y, uint8_t char_code, uint8_t attr) {
+  uint8_t fg = CGA_PALETTE16[attr & 0x0F];
+  uint8_t bg = CGA_PALETTE16[(attr >> 4) & 0x0F];
+
+  // Each character is an 8x16 pixel block
+  for (int row = 0; row < 16; row++) {
+    uint8_t glyph_row = vgafont16[char_code * 16 + row];
+    for (int col = 0; col < 8; col++) {
+      uint8_t pixel_val = (glyph_row >> (7 - col)) & 0b1;
+      uint8_t color = pixel_val ? fg : bg;
+
+      drawPixel(vga_x + col, vga_y + row, color);
+    }
+  }  
+}
+
 void updateCGAByte(uint16_t offset, uint8_t val) {
 
   // Update CGA Memory Byte
@@ -109,19 +125,9 @@ void updateCGAByte(uint16_t offset, uint8_t val) {
     uint8_t char_code = is_char_byte ? val : text_buffer[offset - 1]; // Get char code from even byte
     uint8_t attr = is_char_byte ? text_buffer[offset + 1] : val;
     text_buffer[offset] = val; // Update text buffer with the new value (char or attribute)
-    uint8_t fg = CGA_PALETTE16[attr & 0x0F];
-    uint8_t bg = CGA_PALETTE16[(attr >> 4) & 0x0F];
 
-    // Each character is an 8x16 pixel block
-    for (int row = 0; row < 16; row++) {
-      uint8_t glyph_row = vgafont16[char_code * 16 + row];
-      for (int col = 0; col < 8; col++) {
-        uint8_t pixel_val = (glyph_row >> (7 - col)) & 0b1;
-        uint8_t color = pixel_val ? fg : bg;
+    render_char(vga_x, vga_y, char_code, attr);
 
-        drawPixel(vga_x + col, vga_y + row, color);
-      }
-    }
   } else if (current_video_mode == 0x6) {
     // CGA Graphics Mode 6: 640x200, 2 colors (1 bit per pixel)
     // Each byte contains 8 pixels: P0 P1 P2 P3 P4 P5 P6 P7 (High bits -> Low bits)
@@ -253,6 +259,40 @@ void updateVGAByte(uint16_t offset, uint8_t val) {
   }
 }
 
+void draw_text_screen() {
+  uint16_t vga_x = 0;
+  uint16_t vga_y = 0;
+  for (uint16_t offset = 0; offset < 4000 ; offset += 2) {
+    render_char(vga_x, vga_y, text_buffer[offset], text_buffer[offset + 1]);
+    vga_x += 8;
+    if (vga_x >= 640) {
+      vga_x = 0;
+      vga_y += 16;
+    }
+  }
+}
+
+void scroll_text(int8_t lines) {
+  if (lines != 0) {
+    // first move the contents up, unless we have to just clear things up
+    if (lines < 0) {
+      uint16_t offset_lines = -lines * 160;
+      memmove(text_buffer, text_buffer + offset_lines, 4000 - offset_lines);
+    } else {
+      uint16_t offset_lines = lines * 160;
+      memmove(text_buffer + offset_lines, text_buffer, 4000 - offset_lines);      
+    }
+  }
+
+  uint8_t clear_start = lines < 0 ?  25 + lines : lines;
+  for (uint16_t offset = clear_start * 160; offset < 4000; offset+=2) {
+    text_buffer[offset] = ' ';
+    text_buffer[offset + 1] = 0x7;
+  }
+
+  draw_text_screen();
+}
+
 void processIO(uint16_t address, uint8_t value) {
   switch (address) {
     case 0x3D8:
@@ -270,6 +310,14 @@ void processIO(uint16_t address, uint8_t value) {
     case 0x3D9:
       // CGA Color control register
       current_palette_idx = (value & 0x10);
+      break;
+
+    // Our own text scrolling. 
+    case 0x3de:
+      // Placeholder for full scrolling params, for the moment we just ignore   
+      break;
+    case 0x3df:
+      scroll_text((int8_t) value);
       break;
     case 0x3C2: // Miscellaneous Output Register
       // this is really crappy, but kinda works

@@ -369,15 +369,15 @@ void play_text() {
     }
 }
 
-void play_ansi(const char *szFilename) {
+uint8_t play_ansi(const char *szFilename, uint8_t start_y = 0) {
     File f = LittleFS.open(szFilename, "r");
     if (!f) {
         Serial.println("Error opening ANSI file");
-        return;
+        return 0;
     }
     Serial.println("ANSI File Opened");
 
-    uint16_t x = 0, y = 0;
+    uint8_t x = 0, y = start_y;
     uint8_t color = 0x07; // Default white on black
     while (f.available()) {
         char c = f.read();
@@ -452,15 +452,27 @@ void play_ansi(const char *szFilename) {
             bus_write(0xB8000 + (y * 160) + x * 2, c);
             bus_write(0xB8000 + (y * 160) + x * 2 + 1, color);
             x++;
+            if (x >= 80) {
+                x = 0;
+                y++;
+            }    
+        }
+        if (y == 25) {
+            delay(30);
+            bus_write(0xB03df, -1); // Scroll up
+            y = 24;
         }
     }
     f.close();
+    return y;
 }
 
+static uint8_t line = 0;
 void loop() {
 
     bus_write(0xB03d8, 0);
-    play_ansi("/rick_short.ans");
+    // play_ansi("/rick_short.ans");
+    line = play_ansi("/DIR.TXT", line);
 
     // play("/simcity.gif", GIFDrawCGAHiRes);
 
