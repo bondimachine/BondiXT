@@ -467,12 +467,61 @@ uint8_t play_ansi(const char *szFilename, uint8_t start_y = 0) {
     return y;
 }
 
-static uint8_t line = 0;
+void inline set_cursor(uint16_t x, uint16_t y) {
+
+    uint16_t offset = y * 160 + x * 2;
+
+    bus_write(0xB03d4, 0xe);
+    bus_write(0xB03d5, offset >> 8);
+    bus_write(0xB03d4, 0xf);
+    bus_write(0xB03d5, offset & 0xFF);
+
+}
+
+
+uint8_t play_type(const char *szFilename, uint8_t start_y = 0) {
+    File f = LittleFS.open(szFilename, "r");
+    if (!f) {
+        Serial.println("Error opening text file");
+        return 0;
+    }
+    
+    uint8_t x = 0, y = start_y;
+    while (f.available()) {
+        char c = f.read();
+        if (c == '\n') {
+            y++;
+            x = 0;
+        } else if (c == '\r') {
+            x = 0;
+        } else {
+            bus_write(0xB8000 + (y * 160) + x * 2, c);
+            bus_write(0xB8000 + (y * 160) + x * 2 + 1, 0x7);
+            x++;
+            if (x == 80) {
+                x >= 0;
+                y++;
+            }
+        }
+        if (y == 25) {
+            bus_write(0xB03df, -1); // Scroll up
+            y = 24;
+        }
+        set_cursor(x, y);
+        delay(800);
+    }
+    return y;
+}    
+
+
+uint8_t line = 0;
 void loop() {
 
     bus_write(0xB03d8, 0);
+    bus_write(0xB03df, 0); // cls
+    line = play_type("/DIR.TXT", line);
     // play_ansi("/rick_short.ans");
-    line = play_ansi("/DIR.TXT", line);
+    // line = play_ansi("/DIR.TXT", line);
 
     // play("/simcity.gif", GIFDrawCGAHiRes);
 

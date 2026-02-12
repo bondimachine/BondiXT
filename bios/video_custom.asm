@@ -1,4 +1,6 @@
 DATA_AREA_VIDEO_MODE EQU 0x49
+DATA_AREA_CURSOR_X EQU 0x50
+DATA_AREA_CURSOR_Y EQU 0x51
 
 init_video:
     ; set default video mode to 80x25 color text mode
@@ -6,6 +8,8 @@ init_video:
     mov es, ax
     mov byte [es:DATA_AREA_VIDEO_MODE], 0x03
 
+    mov byte [es:DATA_AREA_CURSOR_X], 0
+    mov byte [es:DATA_AREA_CURSOR_Y], 0
 ;     mov dx, 0x3da
 ;     in al, dx ; reset the flip-flop by reading the input status register
 
@@ -107,6 +111,18 @@ int10_handler:
     cmp ah, 0x00         
     je .set_video_mode
 
+    cmp ah, 0x02
+    je .set_cursor_position
+
+    cmp ah, 0x03
+    je .query_cursor_position
+
+    cmp ah, 0x6
+    je .scroll_up
+
+    cmp ah, 0x6
+    je .scroll_dn
+
     cmp ah, 0xb
     je .set_palette_cga
 
@@ -193,13 +209,9 @@ int10_handler:
     mov dx, 0x3D9
     mov al, 0x1
     and al, bl
-    rol al, 5
+    mov cl, 5
+    shl al, cl
     out dx, al
-    jmp .done
-
-.teletype_output:
-    ; for the moment we still send teletype output to serial port
-    call serial_putc
     jmp .done
 
 .read_video_mode:
@@ -244,6 +256,136 @@ int10_handler:
 
     mov al, 0x1a
     mov bl, 0x8 ; yes, we are VGA
+    jmp .done
+
+.set_cursor_position:
+
+    mov ax, 0x40
+    mov es, ax
+    mov word [es:DATA_AREA_CURSOR_X], dx
+
+.update_cursor:
+
+    mov al, dh
+    mov cl, 160
+    mul cl
+
+    mov ch, 0
+    mov cl, dl
+    shl cx, 1
+    add ax, cx
+    mov cx, ax
+
+    mov dx, 0x3d4
+    mov al, 0x0e
+    out dx, al
+
+    inc dx
+    mov al, ch
+    out dx, al
+
+    dec dx
+    mov al, 0x0f
+    out dx, al
+
+    inc dx
+    mov al, cl
+    out dx, al
+
+    jmp .done
+
+
+.query_cursor_position:
+    mov ax, 0x40
+    mov es, ax
+    mov dx, word [es:DATA_AREA_CURSOR_X]
+    jmp .done
+
+.scroll_up:
+    neg al
+
+.scroll_dn:
+    mov dx, 0x3df
+    out dx, al
+    jmp .done
+
+.teletype_output:
+    ; for debugging
+    ; call serial_putc
+
+    ; Handle carriage return (CR, 0x0D)
+    cmp al, 0x0D
+    je .teletype_cr
+
+    ; Handle line feed (LF, 0x0A)
+    cmp al, 0x0A
+    je .teletype_lf
+
+    ; Write character to video memory
+    mov ax, 0x40
+    mov es, ax
+    mov dl, [es:DATA_AREA_CURSOR_X]
+    mov dh, [es:DATA_AREA_CURSOR_Y]
+
+    ; Calculate offset: (row * 80 + col) * 2
+    mov ah, 0
+    mov al, dh
+    mov cl, 160
+    mul cl
+
+    mov ch, 0
+    mov cl, dl
+    shl cx, 1
+    add ax, cx
+    mov si, ax
+
+    ; Write to video memory at B8000
+    mov ax, 0xb800
+    mov es, ax
+    mov byte [es:si], al      ; character
+    mov byte [es:si+1], 0x07  ; attribute (white on black)
+
+    ; Increment cursor X
+    mov ax, 0x40
+    mov es, ax
+    inc byte [es:DATA_AREA_CURSOR_X]
+
+    ; Check if X reached 80
+    cmp byte [es:DATA_AREA_CURSOR_X], 80
+    jne .teletype_update_hw
+
+    ; Reset X to 0 and increment Y
+    mov byte [es:DATA_AREA_CURSOR_X], 0
+    inc byte [es:DATA_AREA_CURSOR_Y]
+
+.check_scroll_and_update_cursor:
+    ; Check if Y reached 25
+    cmp byte [es:DATA_AREA_CURSOR_Y], 25
+    jne .teletype_update_hw
+
+    ; Scroll up: set Y to 24 and scroll
+    mov byte [es:DATA_AREA_CURSOR_Y], 24
+    mov al, -1
+    mov dx, 0x3df
+    out dx, al
+
+.teletype_update_hw:
+    mov dx, word [es:DATA_AREA_CURSOR_X]
+    call .update_cursor
+    jmp .done
+
+.teletype_cr:
+    mov ax, 0x40
+    mov es, ax
+    mov byte [es:DATA_AREA_CURSOR_X], 0
+    jmp .teletype_update_hw
+
+.teletype_lf:
+    mov ax, 0x40
+    mov es, ax
+    inc byte [es:DATA_AREA_CURSOR_Y]
+    jmp .check_scroll_and_update_cursor
+
     jmp .done
 
 .done:

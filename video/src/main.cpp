@@ -87,9 +87,12 @@ void vsync_isr(void) {
   vsync_flag = false;
 }  
 
+repeating_timer_t cursor_timer;
 
-void demo(int color);
-
+bool cursor_timer_callback(repeating_timer_t* ignored) {
+  render_cursor(!cursor_state);
+  return true;
+}
 
 void setup() {
   Serial.begin(115200);
@@ -244,10 +247,13 @@ void setup() {
   while (!text_buffer) {
     Serial.println("Error: Could not allocate text buffer");
   }
+
+  add_repeating_timer_ms(500, cursor_timer_callback, NULL, &cursor_timer);
 }
 
-// Process Bus Writes from PIO FIFO
-void processBus(PIO pio, uint sm) {
+// Process Bus Writes from PIO FIFO. Full Core1 dedidated to it.
+void loop1() {
+  while(sm_bus < 0) {}
   while (true) {
     #ifdef USE_BUS_DMA
     uint32_t data = buffer_bus[buffer_bus_read_index];
@@ -257,7 +263,7 @@ void processBus(PIO pio, uint sm) {
     buffer_bus[buffer_bus_read_index] = 0;
     buffer_bus_read_index = (buffer_bus_read_index + 1) % BUS_BUFFER_SIZE;
     #else
-    uint32_t data = pio_sm_get_blocking(pio, sm);
+    uint32_t data = pio_sm_get_blocking(pio_bus, sm_bus);
     #endif
 
     // Format from bus.pio:
@@ -336,7 +342,6 @@ void demo(int color) {
 
 // int color = 0; 
 void loop() {
-  processBus(pio_bus, sm_bus);
   // demo(color);
   // color = (color + 1) % 64;
 }

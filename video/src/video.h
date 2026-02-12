@@ -64,6 +64,10 @@ const uint8_t CGA_PALETTE4_1[4] = {BLACK, CYAN, MAGENTA,
 uint8_t current_palette_idx = 1;
 bool volatile vsync_flag = false;
 
+uint8_t crtc_register_latch = 0;
+uint16_t cursor_offset = 0;
+uint8_t next_cursor_offset_hi = 0;
+
 // Helper to get color from current palette
 uint8_t getCGAColor(uint8_t color_idx) {
   if (current_palette_idx == 0) {
@@ -293,8 +297,48 @@ void scroll_text(int8_t lines) {
   draw_text_screen();
 }
 
+bool cursor_state = false;
+
+void render_cursor(bool show) {
+  if (current_video_mode = 0x2) {
+
+    uint16_t vga_y = (cursor_offset / 160) * 16; // Each line has 80 chars * 2 bytes/char = 160 bytes
+    uint16_t vga_x = ((cursor_offset % 160) / 2) * 8; // Which character in the line (0-79)
+
+    for (int row = 14; row < 16; row++) {
+      for (int col = 0; col < 8; col++) {
+        drawPixel(vga_x + col, vga_y + row, show ? LIGHT_GRAY : BLACK);
+      }
+    }  
+    
+    cursor_state = show;
+  }
+}
+
+inline void crtc_register_set(uint8_t value) {
+  switch(crtc_register_latch) {
+    case 0x0e:
+      next_cursor_offset_hi = value;
+      break;
+    case 0x0f:
+      render_cursor(false);
+      cursor_offset = value | (next_cursor_offset_hi << 8);
+      render_cursor(true);
+      break;
+  }
+}
+
 void processIO(uint16_t address, uint8_t value) {
   switch (address) {
+
+    case 0x3D4:
+      crtc_register_latch = value;
+      break;
+
+    case 0x3D5:
+      crtc_register_set(value);
+      break;
+
     case 0x3D8:
       // CGA Mode control register
       if (value & 0x2) { // graphics mode
