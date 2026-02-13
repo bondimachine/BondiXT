@@ -2,9 +2,9 @@
 BITS 16
 CPU 8086
 
-; DISK_IMAGE_SEGMENT equ 0xE000 ; 0xE0000 / 16
+DISK_IMAGE_SEGMENT equ 0xE000 ; 0xE0000 / 16
 
-DISK_IMAGE_SEGMENT equ 0xFE00 ; 8 kb rom
+; DISK_IMAGE_SEGMENT equ 0xFE00 ; 8 kb rom
 
 POST_ADDRESS equ 0x378 ; parallel port for POST code output until we move it to 0x80
 
@@ -70,12 +70,12 @@ _start:
     add si, 2
     mov word [es:si], cs
 
-    sti                   ; enable interrupts again
-
-
     mov dx, POST_ADDRESS
     mov al, 0b11000010
     out dx, al
+
+    ; sti                   ; enable interrupts again
+
 
     call serial_init
     
@@ -123,8 +123,8 @@ _start:
 
 %include "serial.asm"
 %include "serial_util.asm"
-%include "video_serial.asm"
-; %include "video_custom.asm"
+; %include "video_serial.asm"
+%include "video_custom.asm"
 %include "keyboard_serial.asm"
 %include "disk_embedded.asm"
 

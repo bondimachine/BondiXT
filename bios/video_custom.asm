@@ -264,7 +264,7 @@ int10_handler:
     mov es, ax
     mov word [es:DATA_AREA_CURSOR_X], dx
 
-.update_cursor:
+.update_cursor_and_done:
 
     mov al, dh
     mov cl, 160
@@ -311,7 +311,7 @@ int10_handler:
 
 .teletype_output:
     ; for debugging
-    ; call serial_putc
+    call serial_putc
 
     ; Handle carriage return (CR, 0x0D)
     cmp al, 0x0D
@@ -371,8 +371,7 @@ int10_handler:
 
 .teletype_update_hw:
     mov dx, word [es:DATA_AREA_CURSOR_X]
-    call .update_cursor
-    jmp .done
+    jmp .update_cursor_and_done
 
 .teletype_cr:
     mov ax, 0x40
@@ -389,10 +388,12 @@ int10_handler:
     jmp .done
 
 .done:
+
     pop es
     pop si
     pop dx
     pop cx
+
     iret
 
 ; atc80x25:
