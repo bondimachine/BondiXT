@@ -1,13 +1,20 @@
 #include <Arduino.h>
 #include <Adafruit_TinyUSB.h>
+#include "hid_to_scancode.h"
 
 #if not(CFG_TUD_HID)
   #error "No HID support"
 #endif
+#include "bus.pio.h"
 
 Adafruit_USBH_Host USBHost;
 
+
 bool callback = false;
+
+PIO pio_bus = pio0;
+int sm_bus = -1;
+
 void setup() {
     Serial1.setTX(12);
     Serial1.setRX(13);
@@ -22,11 +29,269 @@ void setup() {
       Serial1.println("Failed to initialize USB Host");
     }; // 0 means use native RP2040 host
 
+    pinMode(14, OUTPUT);
+    digitalWrite(14, LOW);
+
+    pinMode(15, OUTPUT);
+    digitalWrite(15, LOW);
+
     Serial1.println("Started");
+
 }
+
+void setup1() {
+// --- Bus Interface Initialization ---
+  // Using PIO0 for the Bus Interface
+  // pio_bus is global
+  unsigned int offset_bus = pio_add_program(pio_bus, &bus_program);
+  sm_bus = pio_claim_unused_sm(pio_bus, true);
+
+  while (sm_bus < 0) {
+    Serial1.println("Error: Could not claim State Machine for Bus Interface");
+  }
+
+  bus_program_init(pio_bus, sm_bus, offset_bus, 0);
+
+}
+
+volatile uint8_t status_register = 0b00000100;
+volatile uint8_t command_byte = 0b010000111;
+
+volatile uint8_t next60h = 0;
+volatile uint8_t after_ack = 0;
+volatile bool keyboard_enabled = true;
+volatile bool mouse_enabled = false;
+
+
+// Circular buffer for keyboard/mouse data
+struct KbdBufferItem {
+  uint8_t data;
+  bool is_mouse;
+};
+
+#define DATA_BUF_SIZE 16
+KbdBufferItem data_buffer[DATA_BUF_SIZE];
+uint8_t data_head = 0;
+uint8_t data_tail = 0;
+uint8_t data_count = 0;
+
+void data_buf_write(uint8_t data, bool is_mouse) {
+  if (data_count >= DATA_BUF_SIZE) return;
+
+  if (is_mouse && !mouse_enabled) {
+    return;
+  }
+
+  if (!is_mouse && !keyboard_enabled) {
+    return;
+  }
+
+  data_buffer[data_head] = {data, is_mouse};
+  data_head = (data_head + 1) % DATA_BUF_SIZE;
+  data_count++;
+  
+  if (data_count == 1) {
+      status_register |= 1; // OBF
+      if (is_mouse) status_register |= 0x20; else status_register &= ~0x20;
+  }
+
+  if (is_mouse && (command_byte & 0b10)) {
+    digitalWrite(15 , HIGH);
+    __asm("nop; nop; nop; nop; nop; nop; nop; nop;");
+    digitalWrite(15, LOW);
+  } else if (!is_mouse && (command_byte & 0b1)) {
+    digitalWrite(14, HIGH);
+    __asm("nop; nop; nop; nop; nop; nop; nop; nop;");
+    digitalWrite(14, LOW);
+  }
+}
+
+uint8_t data_buf_read() {
+  if (data_count == 0) return 0;
+  uint8_t data = data_buffer[data_tail].data;
+  data_tail = (data_tail + 1) % DATA_BUF_SIZE;
+  data_count--;
+  return data;
+}
+
+void process8042_64h_write(uint8_t command) {
+
+  switch (command) {
+    case 0x20: // read keyboard command byte
+    case 0x60: // write keyboard command byte. bit 6 = 0 => enable mouse
+    case 0xEE: // diagnostic, return EE
+    case 0xA9: // test mouse, return 0 in data
+    case 0xAA: // test, return 55h in data
+    case 0xAB: // keyboard test, return 0 in data
+    case 0xD4: // write to mouse port
+      status_register |= 1;
+      next60h = command;
+      break;
+    case 0xAD: // disable keyboard
+      keyboard_enabled = false;
+      break;
+    case 0xAE: // enable keyboard
+      keyboard_enabled = true;
+      break;
+    case 0xA7: // disable mouse
+      mouse_enabled = false;
+      break;
+    case 0xA8: // enable mouse
+      mouse_enabled = true;
+      break;
+  }
+}
+
+uint8_t process8042_60h_read() {
+  if (data_count <= 1) {
+    status_register &= 0b11111110;
+  }
+  switch (next60h) {
+    case 0: // read data byte
+      {
+        uint8_t data = data_buf_read();
+        if (data_count > 0) {
+          if (data_buffer[data_tail].is_mouse) {
+            status_register |= 0x20;
+          } else {
+            status_register &= ~0x20;
+          }
+        } else {
+          status_register &= ~0x20;
+        }
+        return data;
+      }
+    case 0x20: // read keyboard command byte
+      next60h = 0;
+      return command_byte;
+    case 0xA9: // test mouse, return 0 in data
+    case 0xAB: // keyboard test, return 0 in data
+      next60h = 0;
+      return 0;
+    case 0xAA: // test, return 55h in data
+      next60h = 0;
+      return 0xAA;
+    case 0xEE: // diagnostic, return EE
+      next60h = 0;
+      return 0xEE;
+    case 0xC0: // get scancode (internal)
+      next60h = 0;
+      return 0x43;
+    case 0xF2: // mouse id
+      return 0x03;
+    case 0xFA: // ack
+      next60h = after_ack;
+      if (after_ack) {
+        status_register |= 1;
+      }
+      return 0xFA;
+  }
+  return 0;
+}
+
+void process8042_60h_write(uint8_t value) {
+
+  switch (next60h) {
+    case 0x60:
+      command_byte = value;
+      mouse_enabled = value & 0b00100000;
+      keyboard_enabled = value & 0b00010000;
+      next60h = 0xFA;
+      status_register |= 1;
+      return;
+    case 0xCD: // write leds value (internal)
+      // TODO set the leds
+      next60h = 0xFA;
+      status_register |= 1;
+      return;
+    case 0xC3: // set autorepeat (internal)
+      // TODO set 
+      next60h = 0xFA;
+      status_register |= 1;
+      return;
+    case 0xC0: // select scancode value (internal)
+      next60h = 0xFA;
+      status_register |= 1;
+      return;
+    // case 0xD4: // write to mouse port, only care for id, see below.
+  }
+
+  switch (value) {
+    case 0xED: // leds
+      next60h = 0xCD;
+      break;
+    case 0xEE: // diagnostic, return EE
+      next60h = 0xEE;
+      status_register |= 1;
+      break;
+    case 0xF0: // select scancode
+      next60h = 0xC0;
+      status_register |= 1;
+      break;
+    case 0xF3: // set autorepeat;
+      next60h = 0xC3;
+      break;
+    case 0xF2:
+      if (next60h == 0xD4) {
+        after_ack = 0xF2;
+      } else {
+        // we are "ancient AT keyboard" so we don't respond anything
+        after_ack = 0;
+      }
+      next60h = 0xFA;
+      status_register |= 1;
+      break;
+    case 0xF4: // enable scanning
+      next60h = 0xFA;
+      status_register |= 1;
+      break;      
+    case 0xF5: // disable scanning
+      next60h = 0xFA;
+      status_register |= 1;      
+      break;      
+  }
+}
+
 
 void loop() {
     USBHost.task();
+    if (Serial1.available()) {
+        int inByte = Serial1.read();
+        if (inByte == 'r') {
+          reset_usb_boot(0,0);
+        }
+    }
+}
+
+void loop1() {
+    uint32_t data = pio_sm_get_blocking(pio_bus, sm_bus);
+
+    // Format from bus.pio:
+    // ISR = [Address (8) << 9  | Data (8) << 1 | Flag (1)]
+
+    uint8_t value = (data >> 1) & 0xFF;
+    uint8_t address = ((data >> 9) & 0xFF);
+    bool write = data & 0x1;
+    uint8_t output_data = 0;
+
+    if (address == 0x64) {
+      if (write) {
+        process8042_64h_write(value);
+      } else {
+        output_data = status_register;
+      }
+    } else if (address == 0x60) {
+      if (write) {
+        process8042_60h_write(value);
+      } else {
+        output_data = process8042_60h_read();
+      }
+    }
+
+    if (!write) {
+      pio_sm_put(pio_bus, sm_bus, output_data);
+    }
+
 }
 
 void tuh_mount_cb(uint8_t daddr) {
@@ -125,45 +390,88 @@ static inline bool find_key_in_report(hid_keyboard_report_t const *report, uint8
   return false;
 }
 
+static void send_scancode(uint8_t hid_code, bool make) {
+  if (hid_code >= HID_TO_SCANCODE_TABLE_SIZE) return;
+  uint16_t scan = hid_to_scancode[hid_code];
+  if (!scan) return;
+  
+  if (scancode_is_extended(scan)) {
+    data_buf_write(0xE0, false);
+  }
+  
+  uint8_t base = scancode_base(scan);
+  if (make) {
+    data_buf_write(base, false);
+  } else {
+    data_buf_write(base | 0x80, false);
+  }
+}
+
 static void process_kbd_report(hid_keyboard_report_t const *report) {
   static hid_keyboard_report_t prev_report = {0, 0, {0}};// previous report to check key released
 
-  //------------- example code ignore control (non-printable) key affects -------------//
-  for (uint8_t i = 0; i < 6; i++) {
-    if (report->keycode[i]) {
-      if (find_key_in_report(&prev_report, report->keycode[i])) {
-        // exist in previous report means the current key is holding
-      } else {
-        // not existed in previous report means the current key is pressed
-        bool const is_shift = report->modifier & (KEYBOARD_MODIFIER_LEFTSHIFT | KEYBOARD_MODIFIER_RIGHTSHIFT);
-        uint8_t ch = keycode2ascii[report->keycode[i]][is_shift ? 1 : 0];
-        Serial1.write(ch);
-        if (ch == '\r') {
-          Serial1.write('\n');
+  // Process modifiers
+  uint8_t changed_modifiers = report->modifier ^ prev_report.modifier;
+  if (changed_modifiers) {
+    for (uint8_t i = 0; i < 8; i++) {
+        if (changed_modifiers & (1 << i)) {
+            // HID modifier codes start at 0xE0
+            if (report->modifier & (1 << i)) {
+                send_scancode(0xE0 + i, true);
+            } else {
+                send_scancode(0xE0 + i, false);
+            }
         }
+    }
+  }
 
-        Serial1.flush();
+  // Check for released keys (present in prev, not in current)
+  for (uint8_t i = 0; i < 6; i++) {
+    uint8_t code = prev_report.keycode[i];
+    if (code) {
+      if (!find_key_in_report(report, code)) {
+        send_scancode(code, false);
       }
     }
-    // TODO example skips key released
+  }
+
+  // Check for pressed keys (present in current, not in prev)
+  for (uint8_t i = 0; i < 6; i++) {
+    uint8_t code = report->keycode[i];
+    if (code) {
+      if (!find_key_in_report(&prev_report, code)) {
+        send_scancode(code, true);
+      }
+    }
   }
 
   prev_report = *report;
 }
 
 static void process_mouse_report(hid_mouse_report_t const *report) {
-  static hid_mouse_report_t prev_report = {0};
 
-  // button state
-  // uint8_t button_changed_mask = report->buttons ^ prev_report.buttons;
-  // if (button_changed_mask & report->buttons) { 
-  // }
+  // Standard PS/2 Mouse Packet (3 bytes)
+  // Byte 1: Y ovf, X ovf, Y sign, X sign, 1, M, R, L
+  // Byte 2: X
+  // Byte 3: Y
+  
+  uint8_t buttons = 0;
+  if (report->buttons & MOUSE_BUTTON_LEFT) buttons |= 1;
+  if (report->buttons & MOUSE_BUTTON_RIGHT) buttons |= 2;
+  if (report->buttons & MOUSE_BUTTON_MIDDLE) buttons |= 4;
 
-    Serial1.printf("Mouse %c%c%c (%d, %d, %)d\r\n", 
-            report->buttons & MOUSE_BUTTON_LEFT ? 'L' : '-',
-           report->buttons & MOUSE_BUTTON_MIDDLE ? 'M' : '-',
-           report->buttons & MOUSE_BUTTON_RIGHT ? 'R' : '-',
-                   report->x, report->y, report->wheel);
+  // PS/2 Y is up-positive, HID is down-positive.
+  int16_t rx = report->x;
+  int16_t ry = -report->y; 
+  
+  uint8_t byte1 = 0x08 | (buttons & 0x07);
+  if (rx < 0) byte1 |= 0x10;
+  if (ry < 0) byte1 |= 0x20;
+  // Overflow handling omitted for simplicity (HID deltas usually fit)
+
+  data_buf_write(byte1, true);
+  data_buf_write((uint8_t)rx, true);
+  data_buf_write((uint8_t)ry, true);
 }
 
 //--------------------------------------------------------------------+
@@ -197,7 +505,7 @@ static void process_generic_report(uint8_t dev_addr, uint8_t instance, uint8_t c
   }
 
   if (!rpt_info) {
-    Serial.printf("Couldn't find report info !\r\n");
+    Serial1.printf("Couldn't find report info !\r\n");
     return;
   }
 
@@ -214,11 +522,11 @@ static void process_generic_report(uint8_t dev_addr, uint8_t instance, uint8_t c
         break;
 
       default:
-        Serial.printf("report[%u] ", rpt_info->report_id);
+        Serial1.printf("report[%u] ", rpt_info->report_id);
         for (uint8_t i = 0; i < len; i++) {
-          Serial.printf("%02X ", report[i]);
+          Serial1.printf("%02X ", report[i]);
         }
-        Serial.printf("\r\n");
+        Serial1.printf("\r\n");
         break;
     }
   }
