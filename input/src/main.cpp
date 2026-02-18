@@ -15,6 +15,8 @@ bool callback = false;
 PIO pio_bus = pio0;
 int sm_bus = -1;
 
+uint8_t pins61h = 0;
+
 void setup() {
     Serial1.setTX(12);
     Serial1.setRX(13);
@@ -33,6 +35,12 @@ void setup() {
     digitalWrite(14, LOW);
 
     pinMode(15, OUTPUT);
+    digitalWrite(15, LOW);
+
+    pinMode(26, OUTPUT);
+    digitalWrite(14, LOW);
+
+    pinMode(27, OUTPUT);
     digitalWrite(15, LOW);
 
     Serial1.println("Started");
@@ -54,7 +62,6 @@ void setup1() {
 
 }
 
-volatile uint8_t status_register = 0b00000100;
 volatile uint8_t command_byte = 0b010000111;
 
 volatile uint8_t next60h = 0;
@@ -71,9 +78,9 @@ struct KbdBufferItem {
 
 #define DATA_BUF_SIZE 16
 KbdBufferItem data_buffer[DATA_BUF_SIZE];
-uint8_t data_head = 0;
-uint8_t data_tail = 0;
-uint8_t data_count = 0;
+volatile uint8_t data_head = 0;
+volatile uint8_t data_tail = 0;
+volatile uint8_t data_count = 0;
 
 void data_buf_write(uint8_t data, bool is_mouse) {
   if (data_count >= DATA_BUF_SIZE) return;
@@ -90,19 +97,14 @@ void data_buf_write(uint8_t data, bool is_mouse) {
   data_head = (data_head + 1) % DATA_BUF_SIZE;
   data_count++;
   
-  if (data_count == 1) {
-      status_register |= 1; // OBF
-      if (is_mouse) status_register |= 0x20; else status_register &= ~0x20;
-  }
-
   if (is_mouse && (command_byte & 0b10)) {
-    digitalWrite(15 , HIGH);
+    gpio_put(15 , true);
     __asm("nop; nop; nop; nop; nop; nop; nop; nop;");
-    digitalWrite(15, LOW);
+    gpio_put(15, false);
   } else if (!is_mouse && (command_byte & 0b1)) {
-    digitalWrite(14, HIGH);
+    gpio_put(14, true);
     __asm("nop; nop; nop; nop; nop; nop; nop; nop;");
-    digitalWrite(14, LOW);
+    gpio_put(14, false);
   }
 }
 
@@ -124,43 +126,33 @@ void process8042_64h_write(uint8_t command) {
     case 0xAA: // test, return 55h in data
     case 0xAB: // keyboard test, return 0 in data
     case 0xD4: // write to mouse port
-      status_register |= 1;
       next60h = command;
       break;
     case 0xAD: // disable keyboard
       keyboard_enabled = false;
+      Serial1.println("keyboard disabled");
       break;
     case 0xAE: // enable keyboard
       keyboard_enabled = true;
+      Serial1.println("keyboard enabled");
       break;
     case 0xA7: // disable mouse
       mouse_enabled = false;
+      Serial1.println("mouse disabled");
       break;
     case 0xA8: // enable mouse
       mouse_enabled = true;
+      Serial1.println("mouse enabled");
       break;
   }
 }
 
 uint8_t process8042_60h_read() {
-  if (data_count <= 1) {
-    status_register &= 0b11111110;
-  }
   switch (next60h) {
-    case 0: // read data byte
-      {
-        uint8_t data = data_buf_read();
-        if (data_count > 0) {
-          if (data_buffer[data_tail].is_mouse) {
-            status_register |= 0x20;
-          } else {
-            status_register &= ~0x20;
-          }
-        } else {
-          status_register &= ~0x20;
-        }
-        return data;
-      }
+    case 0: {// read data byte
+      uint8_t data = data_buf_read();
+      return data;
+    }  
     case 0x20: // read keyboard command byte
       next60h = 0;
       return command_byte;
@@ -181,9 +173,6 @@ uint8_t process8042_60h_read() {
       return 0x03;
     case 0xFA: // ack
       next60h = after_ack;
-      if (after_ack) {
-        status_register |= 1;
-      }
       return 0xFA;
   }
   return 0;
@@ -197,21 +186,17 @@ void process8042_60h_write(uint8_t value) {
       mouse_enabled = value & 0b00100000;
       keyboard_enabled = value & 0b00010000;
       next60h = 0xFA;
-      status_register |= 1;
       return;
     case 0xCD: // write leds value (internal)
       // TODO set the leds
       next60h = 0xFA;
-      status_register |= 1;
       return;
     case 0xC3: // set autorepeat (internal)
       // TODO set 
       next60h = 0xFA;
-      status_register |= 1;
       return;
     case 0xC0: // select scancode value (internal)
       next60h = 0xFA;
-      status_register |= 1;
       return;
     // case 0xD4: // write to mouse port, only care for id, see below.
   }
@@ -222,11 +207,9 @@ void process8042_60h_write(uint8_t value) {
       break;
     case 0xEE: // diagnostic, return EE
       next60h = 0xEE;
-      status_register |= 1;
       break;
     case 0xF0: // select scancode
       next60h = 0xC0;
-      status_register |= 1;
       break;
     case 0xF3: // set autorepeat;
       next60h = 0xC3;
@@ -239,19 +222,20 @@ void process8042_60h_write(uint8_t value) {
         after_ack = 0;
       }
       next60h = 0xFA;
-      status_register |= 1;
       break;
     case 0xF4: // enable scanning
       next60h = 0xFA;
-      status_register |= 1;
       break;      
     case 0xF5: // disable scanning
       next60h = 0xFA;
-      status_register |= 1;      
       break;      
   }
 }
 
+inline uint8_t status_register() {
+  bool has_data = data_count > 0;
+  return 0x4 | ((has_data && data_buffer[data_tail].is_mouse) << 5) | (has_data || next60h > 0);
+}
 
 void loop() {
     USBHost.task();
@@ -278,13 +262,21 @@ void loop1() {
       if (write) {
         process8042_64h_write(value);
       } else {
-        output_data = status_register;
+        output_data = status_register();
       }
     } else if (address == 0x60) {
       if (write) {
         process8042_60h_write(value);
       } else {
         output_data = process8042_60h_read();
+      }
+    } else if (address == 0x61) {
+      if (write) {
+        pins61h = value;
+        gpio_put(26, pins61h & 1);
+        gpio_put(27, pins61h & 2);
+      } else {
+        output_data = pins61h;
       }
     }
 
