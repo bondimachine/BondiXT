@@ -1,3 +1,4 @@
+; %define PS2_MOUSE
 %include "config.serial.inc"
 BITS 16
 CPU 8086
@@ -24,6 +25,14 @@ _start:
 
     xor ax, ax
     mov es, ax            ; ES = 0
+
+%ifdef PS2_MOUSE
+    ; Given we don't have cascade, we use IRQ2 as the marker for PS/2 mouse instead of 12
+    mov si, 0x28
+    mov word [es:si], irq12_handler
+    add si, 2
+    mov word [es:si], cs
+%endif
 
     mov si, 0x40
     mov word [es:si], int10_handler
@@ -70,12 +79,12 @@ _start:
     add si, 2
     mov word [es:si], cs
 
+    sti                   ; enable interrupts again
+
+
     mov dx, POST_ADDRESS
     mov al, 0b11000010
     out dx, al
-
-    ; sti                   ; enable interrupts again
-
 
     call serial_init
     
@@ -128,12 +137,21 @@ _start:
 %include "keyboard_serial.asm"
 %include "disk_embedded.asm"
 
+%ifdef PS2_MOUSE
+%include "mouse.asm"
+%endif
+
 
 int11_handler:
     ; 1 floppy 
     ; 80x25 cga
     ; 1 rs232 port
+    ; mouse
+%ifdef PS2_MOUSE
+    mov ax, 0x224
+%else
     mov ax, 0x221
+%endif
     iret
 
 int12_handler:
@@ -141,6 +159,13 @@ int12_handler:
     iret
 
 int15_handler:
+%ifdef PS2_MOUSE
+    cmp	ah,0C2h
+    jne .default
+    jmp int15_mouse
+
+.default:
+%endif
     stc
     iret
 
