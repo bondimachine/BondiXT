@@ -95,6 +95,7 @@ uint8_t in(uint8_t port) {
 }
 
 void out(uint8_t port, uint8_t data) {
+
     // 1. Output Address
     gpio_set_dir_out_masked(0xFF);
     write_bus(port);
@@ -102,8 +103,8 @@ void out(uint8_t port, uint8_t data) {
     
     CLK();
 
-    gpio_put(PIN_WR, false);
     write_bus(data);
+    gpio_put(PIN_WR, false);
 
     CLK();
     CLK();
@@ -118,8 +119,8 @@ void out(uint8_t port, uint8_t data) {
 
 bool send_command(uint8_t address, uint8_t cmd) {
     uint16_t timeout = 1000;
-    while((in(0x64) & 10) && (timeout > 0)) { timeout --; } // wait for input buffer not full
-    if (!timeout) {
+    while((in(0x64) & 0b10) && (timeout > 0)) { timeout --; } // wait for input buffer not full
+    if (timeout > 0) {
         out(address, cmd);
         return true;
     }
@@ -138,7 +139,7 @@ bool poll_data() {
 }
 
 ps2data read_data() {
-    return ps2data { in(0x60), (last_poll & 10000) > 0 };
+    return ps2data { in(0x60), (last_poll & 0x20) > 0 };
 }
 
 bool send_controller_command(uint8_t cmd) {
@@ -162,11 +163,16 @@ void setup() {
         Serial.println("Failed to set RX");
     }
     Serial1.begin(115200);
+
+    delay(1000);
+
+
     Serial.println("Started");
 
     setup_bus_pins();
 
-    send_command(0x60, 0xA8); // enable mouse
+    send_command(0x64, 0xA8); // enable mouse
+
 }
 
 void loop1() {
@@ -186,9 +192,6 @@ void loop() {
     static uint8_t mouse_idx = 0;
     if(poll_data()) {
         ps2data data = read_data();
-        if (!data.data) {
-            return;
-        }
         if (!data.mouse) {
             uint8_t ascii = kbd_US[data.data - (data.data < 128 ? 0 : 128)] ; 
             Serial.printf("0x%x '%c' %s\n", data.data, ascii, data.data < 128 ? "dn" : "up");

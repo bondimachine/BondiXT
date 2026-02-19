@@ -27,7 +27,7 @@ rom8k: $(BIN) disk.bin
 	cat empty.bin disk.bin.truncated $(BIN).truncated > rom8k.bin.extended
 	
 
-$(BIN): $(ASM) serial.asm video_serial.asm keyboard_serial.asm disk_embedded.asm config.serial.inc video_custom.asm
+$(BIN): $(ASM) serial.asm video_serial.asm keyboard_serial.asm disk_embedded.asm config.serial.inc video_custom.asm mouse.asm
 	nasm $(NASM_FLAGS) -f bin -o $(BIN) $(ASM)
 
 $(BIN).elf: rom

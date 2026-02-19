@@ -1,4 +1,6 @@
-; %define PS2_MOUSE
+%define PS2_MOUSE
+;%define PS2_MOUSE_IRQ_2
+%define PS2_KEYBOARD
 %include "config.serial.inc"
 BITS 16
 CPU 8086
@@ -26,9 +28,26 @@ _start:
     xor ax, ax
     mov es, ax            ; ES = 0
 
+    mov si, 0x20
+    mov word [es:si], irq0_handler
+    add si, 2
+    mov word [es:si], cs
+
+
+%ifdef PS2_KEYBOARD
+    mov si, 0x24
+    mov word [es:si], irq01_handler
+    add si, 2
+    mov word [es:si], cs
+%endif
+
 %ifdef PS2_MOUSE
+%ifdef PS2_MOUSE_IRQ_2
     ; Given we don't have cascade, we use IRQ2 as the marker for PS/2 mouse instead of 12
     mov si, 0x28
+%else
+    mov si, 0x1D0
+%endif    
     mov word [es:si], irq12_handler
     add si, 2
     mov word [es:si], cs
@@ -116,6 +135,16 @@ _start:
     mov al, 0b11000100
     out dx, al
 
+    call init_keyboard
+
+%ifdef PS2_MOUSE
+    call init_mouse
+%endif
+
+    mov dx, POST_ADDRESS
+    mov al, 0b11000101
+    out dx, al
+
     mov si, boot_message
     call serial_print_string
 
@@ -142,13 +171,18 @@ _start:
 %endif
 
 
+irq0_handler:
+    mov	al, 0x20 ; signal PIC
+	out	0x20, al
+    iret
+
 int11_handler:
     ; 1 floppy 
     ; 80x25 cga
     ; 1 rs232 port
     ; mouse
 %ifdef PS2_MOUSE
-    mov ax, 0x224
+    mov ax, 0x225
 %else
     mov ax, 0x221
 %endif
@@ -160,7 +194,7 @@ int12_handler:
 
 int15_handler:
 %ifdef PS2_MOUSE
-    cmp	ah,0C2h
+    cmp	ah, 0xC2
     jne .default
     jmp int15_mouse
 
@@ -184,4 +218,8 @@ reset_vector:
     jmp 0xF000:_start
 
 padding: ; 64kb
-    times 0x10000 - ($ - $$) db 0
+    times 0xFFFE - ($ - $$) db 0
+
+system_model:
+	db	0xFE ; IBM PC/XT
+	db	0xFF    
