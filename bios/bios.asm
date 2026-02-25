@@ -1,5 +1,5 @@
 %define PS2_MOUSE
-;%define PS2_MOUSE_IRQ_2
+%define PS2_MOUSE_IRQ_2
 %define PS2_KEYBOARD
 %include "config.serial.inc"
 BITS 16
@@ -9,7 +9,7 @@ DISK_IMAGE_SEGMENT equ 0xE000 ; 0xE0000 / 16
 
 ; DISK_IMAGE_SEGMENT equ 0xFE00 ; 8 kb rom
 
-POST_ADDRESS equ 0x378 ; parallel port for POST code output until we move it to 0x80
+POST_ADDRESS equ 0x80 ; parallel port for POST code output until we move it to 0x80
 
 times 0xF000 - ($ - $$) db 0 ; BIOS code starts at 0xF000 
 

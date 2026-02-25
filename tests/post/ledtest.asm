@@ -1,6 +1,6 @@
 BITS 16
 
-POST_PORT equ 0x378
+POST_PORT equ 0x80
 times 0xE000 - ($ - $$) db 0 ; put the code in the last 8kb
 
 _start:

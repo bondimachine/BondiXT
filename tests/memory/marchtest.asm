@@ -4,7 +4,7 @@ BITS 16
 P0 EQU 0b01010101
 P1 EQU 0b10101010
 
-POST_PORT equ 0x378
+POST_PORT equ 0x80
 ; %define QEMU
 
 times 0xE000 - ($ - $$) db 0 ; put the code in the last 8kb
@@ -258,7 +258,7 @@ print:
     out dx, al
     jmp si
 
-; prints al (as a character) to parallel port 0x378 with wait/blink
+; prints al (as a character) to post port with wait/blink
 ; destroys si, dx, cx, sp, al
 print_phase:
     mov sp, si

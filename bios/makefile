@@ -38,7 +38,7 @@ clean:
 	rm -f $(BIN) $(BIN).elf $(BIN).truncated rom.bin
 
 
-# -device isa-debugcon,iobase=0x378,chardev=debug -chardev file,id=debug,path=/dev/stderr
+# -device isa-debugcon,iobase=0x80,chardev=debug -chardev file,id=debug,path=/dev/stderr
 run: rom
 	$(QEMU) -bios rom.bin -serial stdio -device isa-vga 
 
