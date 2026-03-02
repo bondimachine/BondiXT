@@ -11734,7 +11734,7 @@ void drawHighRes() {
     fclose(f);
 
     // Set video mode 06h
-    processMemoryBusMessage(0xB03d8, 0b1010);
+    processIO(0x3d8, 0b1010, true);
 
     // Process image
     // BMP is usually bottom-up

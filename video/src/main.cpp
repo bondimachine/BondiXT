@@ -11,9 +11,13 @@
 /*
  * HARDWARE CONNECTIONS
  *  - GPIO 0-7 --> AD0-AD7
- *  - GPIO 8-14 -> A8-A14
- *  - GPIO 15 ---> A15 || I/O while T1, A16 while T2
- *  - GPIO 16 ---> CLK
+ *  - GPIO 8-10 -> A8-A10
+ *  - GPIO 11 -> A11 / A15
+ *  - GPIO 12 -> A12 / A16
+ *  - GPIO 13 -> A13 / IO/M
+ *  - GPIO 14 -> A14 / DT/R
+ *  - GPIO 15 -> /CS / DEN
+ *  - GPIO 16 ---> MUX select [sideset]
  *  - GPIO 17 ---> 1k ohm resistor ---> VGA Red
  *  - GPIO 18 ---> 330 ohm resistor ---> VGA Red
  *  - GPIO 19 ---> 1k ohm resistor ---> VGA Green
@@ -22,8 +26,9 @@
  *  - GPIO 22 ---> 330 ohm resistor ---> VGA Blue
  *  - GPIO 26 ---> VGA Hsync
  *  - GPIO 27 ---> VGA Vsync
- *  - GPIO 28 ---> /CS
+ *  - GPIO 28 ---> IOCHRDY [set]
  *  - RP2040 GND ---> VGA GND
+ * 
  */
 
 // VGA timing constants
@@ -257,7 +262,7 @@ void loop1() {
   while (true) {
     #ifdef USE_BUS_DMA
     uint32_t data = buffer_bus[buffer_bus_read_index];
-    if (data == 0)  { // even a write of 0 at 0xA0000 will have a flag 1 at bit 24, so total 0 means no data
+    if (data == 0)  { // even a write of 0 at 0xA0000 will have a flag 1 at bit 26, so total 0 means no data
       continue;
     }
     buffer_bus[buffer_bus_read_index] = 0;
@@ -267,15 +272,21 @@ void loop1() {
     #endif
 
     // Format from bus.pio:
-    // ISR = [Address (17) << 8 | Data (8)]
+    //A14-A0 << 12 | DT/R << 11 | IO/R << 10 | A16-A15 << 8 | Data (8)
 
     uint8_t value = data & 0xFF;
-    uint32_t a16 = ((data >> 8) & 0x1) << 16;
-    uint32_t full_address = (((data >> 9) & 0xFFFF) | a16) + 0xA0000;
+    bool is_io = (data >> 10) & 0b1;
+    bool is_write = (data >> 11) & 0b1;
+    uint32_t a15_a16 = ((data >> 8) & 0b11) << 15;
+    uint32_t full_address = (((data >> 12) & 0x7FFF) | a15_a16) ;
 
-    // Serial.printf("Bus Write: Data: 0x%08X, Addr: 0x%05X, Valie: 0x%02X\n", data, full_address, value);
+    // Serial.printf("Bus Message: Data: 0x%08X, Addr: 0x%05X, Value: 0x%02X io: %d write: %d\n", data, full_address, value, is_io, is_write);
 
-    processMemoryBusMessage(full_address, value);
+    if (is_io) {
+      processIO((uint16_t)full_address, value, is_write);
+    } else {
+      processMemoryBusMessage(full_address + 0xA0000, value, is_write);
+    }
 
   }
 }

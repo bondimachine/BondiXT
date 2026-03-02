@@ -63,7 +63,7 @@ void drawTestImageThruBus() {
     fclose(f);
 
     // Set video mode 12h
-    processMemoryBusMessage(0xB03c2, 0xe3);
+    processIO(0x3c2, 0xe3, true);
 
     // Process image
     // BMP is usually bottom-up
@@ -90,7 +90,7 @@ void drawTestImageThruBus() {
             // Write to VGA memory
             // For each plane 0-3
             for (int plane = 0; plane < 4; plane++) {
-                processMemoryBusMessage(0xB03CF, (1 << plane));
+                processIO(0x3CF, (1 << plane), true);
                 
                 uint8_t vga_byte = 0;
                 for (int bit = 0; bit < 8; bit++) {
@@ -104,7 +104,7 @@ void drawTestImageThruBus() {
                 
                 // Only write if not 0 (optimization, though real hardware would write 0s too)
                  // Actually we must write everything to ensure correct state if memory wasn't clear
-                processMemoryBusMessage(addr, vga_byte);
+                processMemoryBusMessage(addr, vga_byte, true);
             }
         }
     }

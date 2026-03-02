@@ -300,7 +300,7 @@ void scroll_text(int8_t lines) {
 bool cursor_state = false;
 
 void render_cursor(bool show) {
-  if (current_video_mode = 0x2) {
+  if (current_video_mode == 0x2) {
 
     uint16_t vga_y = (cursor_offset / 160) * 16; // Each line has 80 chars * 2 bytes/char = 160 bytes
     uint16_t vga_x = ((cursor_offset % 160) / 2) * 8; // Which character in the line (0-79)
@@ -328,7 +328,7 @@ inline void crtc_register_set(uint8_t value) {
   }
 }
 
-void processIO(uint16_t address, uint8_t value) {
+void processIO(uint16_t address, uint8_t value, bool is_write) {
   switch (address) {
 
     case 0x3D4:
@@ -380,13 +380,12 @@ void processIO(uint16_t address, uint8_t value) {
   }  
 }
 
-void processMemoryBusMessage(uint32_t address, uint8_t value) {
+void processMemoryBusMessage(uint32_t address, uint8_t value, bool is_write = true) {
   if (address < 0xB0000) {
     updateVGAByte(address - 0xA0000, value);
-  } else if (address < 0xB8000) {
-    // We are mapping B0000 - B7FFF which is Hercules space as I/O
-    processIO((uint16_t)(address - 0xB0000), value);
-  } else {
+  } else if (address >= 0xB8000) {
     updateCGAByte(address - 0xB8000, value);
+  } else {
+    // TODO: hercules support
   }
 }

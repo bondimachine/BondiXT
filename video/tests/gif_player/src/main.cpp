@@ -6,9 +6,12 @@
 
 // Pin Definitions
 const uint8_t PIN_BUS_BASE = 0; // D0-D15
-const uint8_t PIN_A16 = 15;
-const uint8_t PIN_CLK = 26;
-const uint8_t PIN_CS = 28; // && CLK 
+const uint8_t PIN_A16 = 26;
+const uint8_t PIN_IOM = 27;
+const uint8_t PIN_DEN = 28;
+const uint8_t PIN_CS = 29; 
+
+// missing DT/R and IOCHRDY, but we are not doing any reads.
 
 // AnimatedGIF Object
 AnimatedGIF gif;
@@ -51,7 +54,7 @@ int32_t GIFSeekFile(GIFFILE *pFile, int32_t iPosition) {
 }
 
 // Helper to write to bus (Bit-banged)
-void bus_write(uint32_t address, uint8_t data) {
+void bus_write(uint32_t address, uint8_t data, bool io = false) {
 
     // Serial.print("processMemoryBusMessage(0x");
     // Serial.print(address, HEX);
@@ -59,39 +62,21 @@ void bus_write(uint32_t address, uint8_t data) {
     // Serial.print(data, HEX);
     // Serial.println(");");
 
-    // t1 low
-    gpio_put(PIN_CLK, 0);
-
     gpio_put_masked(0xFFFF, address);    
+    gpio_put(PIN_A16, (address >> 16) & 0x1);
+    gpio_put(PIN_IOM, io);
     gpio_put(PIN_CS, 0);
     HALF_CLOCK();
 
-    // t1 high
-    gpio_put(PIN_CLK, 1);
-    HALF_CLOCK();
-
-    gpio_put(PIN_CLK, 0);
-    // t2 low
-
     gpio_put_masked(0xFF, data);
-    gpio_put(PIN_A16, (address >> 16) & 0x1);
+    gpio_put(PIN_DEN, 0);
 
     HALF_CLOCK();
 
-    // t2 high
-    gpio_put(PIN_CLK, 1);
-    HALF_CLOCK();
-
-    // t3 low
-    gpio_put(PIN_CLK, 0);
-    HALF_CLOCK();
-
-    // t3 high
-    gpio_put(PIN_CLK, 1);
-    HALF_CLOCK();
-
-    // t4
+    gpio_put(PIN_DEN, 1);
     gpio_put(PIN_CS, 1);
+
+    HALF_CLOCK();
 }
 
 uint8_t cga_color(uint8_t gif_pixel) {
@@ -175,7 +160,7 @@ void GIFDrawVGA12h(GIFDRAW *pDraw) {
 
     int memory_x = x / 8;
     for (int plane = 0; plane < 4; plane++) {
-        bus_write(0xB03CF, (1 << plane));
+        bus_write(0x3CF, (1 << plane), true);
 
         for (int i = 0; i < width; i+=8, memory_x++) {
             // 8 pixels at a time
@@ -238,10 +223,19 @@ void setup() {
         gpio_set_dir(i, GPIO_OUT);
     }
 
-    // CLK
-    gpio_init(PIN_CLK);
-    gpio_set_dir(PIN_CLK, GPIO_OUT);
-    gpio_put(PIN_CLK, 0);
+    gpio_init(PIN_A16);
+    gpio_set_dir(PIN_A16, GPIO_OUT);
+
+    // IO/M
+    gpio_init(PIN_IOM);
+    gpio_set_dir(PIN_IOM, GPIO_OUT);
+    gpio_put(PIN_IOM, 0);
+
+
+    // DEN
+    gpio_init(PIN_DEN);
+    gpio_set_dir(PIN_DEN, GPIO_OUT);
+    gpio_put(PIN_DEN, 1); // Default High
 
     // CS
     gpio_init(PIN_CS);
@@ -459,7 +453,7 @@ uint8_t play_ansi(const char *szFilename, uint8_t start_y = 0) {
         }
         if (y == 25) {
             delay(30);
-            bus_write(0xB03df, -1); // Scroll up
+            bus_write(0x3df, -1, true); // Scroll up
             y = 24;
         }
     }
@@ -471,10 +465,10 @@ void inline set_cursor(uint16_t x, uint16_t y) {
 
     uint16_t offset = y * 160 + x * 2;
 
-    bus_write(0xB03d4, 0xe);
-    bus_write(0xB03d5, offset >> 8);
-    bus_write(0xB03d4, 0xf);
-    bus_write(0xB03d5, offset & 0xFF);
+    bus_write(0x3d4, 0xe, true);
+    bus_write(0x3d5, offset >> 8, true);
+    bus_write(0x3d4, 0xf, true);
+    bus_write(0x3d5, offset & 0xFF, true);
 
 }
 
@@ -504,7 +498,7 @@ uint8_t play_type(const char *szFilename, uint8_t start_y = 0) {
             }
         }
         if (y == 25) {
-            bus_write(0xB03df, -1); // Scroll up
+            bus_write(0x3df, -1, true); // Scroll up
             y = 24;
         }
         set_cursor(x, y);
@@ -517,22 +511,20 @@ uint8_t play_type(const char *szFilename, uint8_t start_y = 0) {
 uint8_t line = 0;
 void loop() {
 
-    bus_write(0xB03d8, 0);
-    bus_write(0xB03df, 0); // cls
-    line = play_type("/DIR.TXT", line);
+    // bus_write(0x3d8, 0, true);
+    // bus_write(0x3df, 0, true); // cls
+    // line = play_type("/DIR.TXT", line);
     // play_ansi("/rick_short.ans");
     // line = play_ansi("/DIR.TXT", line);
-
-    // play("/simcity.gif", GIFDrawCGAHiRes);
 
     // play("/stan_cga.gif", GIFDrawCGA);
     // play("/stan_vga.gif", GIFDrawVGA13h);
     #if MAX_WIDTH < 640
         #error "MAX_WIDTH must be at least 640 for VGA test"
     #endif
-    // bus_write(0xB03c2, 0xe3);
-    // play("/win31.gif", GIFDrawVGA12h);
-    // bus_write(0xB03d8, 0b1010);
+    bus_write(0x3c2, 0xe3, true);
+    play("/win31.gif", GIFDrawVGA12h);
+    // bus_write(0x3d8, 0b1010, true);
     // play("/simcity.gif", GIFDrawCGAHiRes);
     // bus_test();
     // pattern_test();
