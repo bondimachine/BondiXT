@@ -90,7 +90,8 @@ void drawTestImageThruBus() {
             // Write to VGA memory
             // For each plane 0-3
             for (int plane = 0; plane < 4; plane++) {
-                processIO(0x3CF, (1 << plane), true);
+                processIO(0x3C4, 2, true);
+                processIO(0x3C5, (1 << plane), true);
                 
                 uint8_t vga_byte = 0;
                 for (int bit = 0; bit < 8; bit++) {

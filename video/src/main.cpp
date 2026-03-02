@@ -6,6 +6,7 @@
 // Include generated headers from the .pio files
 // PlatformIO/pioasm will generate these automatically during build
 #include "bus.pio.h"
+#include "bus_read.pio.h"
 #include "vga.pio.h"
 
 /*
@@ -42,7 +43,7 @@
 // Pin Definitions
 // Adjust these according to your hardware design
 const uint8_t PIN_BUS_BASE = 0; // D0-D16
-const uint8_t PIN_CS = 28;
+const uint8_t PIN_IOCHRDY = 28;
 
 const uint8_t PIN_VGA_HSYNC = 26;
 const uint8_t PIN_VGA_VSYNC = 27;
@@ -51,6 +52,7 @@ const uint8_t PIN_VGA_RGB_BASE = 17; // R, R+, G, G+, B, B+ (6 pins)
 // Global PIO variables for Bus Interface
 PIO pio_bus = pio0;
 int sm_bus = -1;
+int sm_bus_read = -1;
 
 // Using PIO1 for VGA signals to keep them separate and avoid contention
 PIO pio_vga = pio1;
@@ -80,13 +82,6 @@ void rgb_dma_isr() {
   vsync_flag = true;
 }
 
-void io_isr(void) {
-  // for the moment the only possible thing to read is VSYNC
-  pio_bus->irq = 1 << 1; // Clear the interrupt
-  gpio_set_dir(3, GPIO_OUT);
-  gpio_put(3, vsync_flag);
-}
-
 void vsync_isr(void) {
   pio_vga->irq = 1 << 2; // Clear the interrupt
   vsync_flag = false;
@@ -113,8 +108,15 @@ void setup() {
     Serial.println("Error: Could not claim State Machine for Bus Interface");
   }
 
-  gpio_init(3);
+  unsigned int offset_bus_read = pio_add_program(pio_bus, &bus_read_program);
+  sm_bus_read = pio_claim_unused_sm(pio_bus, true);
+
+  while (sm_bus_read < 0) {
+    Serial.println("Error: Could not claim State Machine for Bus Read Interface");
+  }
+
   bus_program_init(pio_bus, sm_bus, offset_bus, PIN_BUS_BASE);
+  bus_read_program_init(pio_bus, sm_bus_read, offset_bus_read, PIN_BUS_BASE);
 
   #ifdef USE_BUS_DMA
   // Setup dma for read
@@ -144,12 +146,6 @@ void setup() {
   // dma started
   dma_channel_configure(dma_channel_bus, &dma_config_bus, buffer_bus, &pio_bus->rxf[sm_bus], dma_encode_transfer_count(BUS_BUFFER_SIZE), true /* start*/); 
   #endif
-
-  irq_set_enabled(PIO0_IRQ_1, false);
-  irq_set_priority(PIO0_IRQ_1, PICO_HIGHEST_IRQ_PRIORITY+1);
-  pio_set_irq1_source_enabled(pio0, pis_interrupt1, true);
-  irq_set_exclusive_handler(PIO0_IRQ_1, io_isr);
-  irq_set_enabled(PIO0_IRQ_1, true);
 
   Serial.println("Bus Interface Initialized");
 
@@ -282,10 +278,15 @@ void loop1() {
 
     // Serial.printf("Bus Message: Data: 0x%08X, Addr: 0x%05X, Value: 0x%02X io: %d write: %d\n", data, full_address, value, is_io, is_write);
 
+    uint8_t result;
     if (is_io) {
-      processIO((uint16_t)full_address, value, is_write);
+      result = processIO((uint16_t)full_address, value, is_write);
     } else {
-      processMemoryBusMessage(full_address + 0xA0000, value, is_write);
+      result = processMemoryBusMessage(full_address + 0xA0000, value, is_write);
+    }
+
+    if (!is_write) {
+      pio_sm_put_blocking(pio_bus, sm_bus_read, result);
     }
 
   }

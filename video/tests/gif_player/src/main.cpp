@@ -160,7 +160,8 @@ void GIFDrawVGA12h(GIFDRAW *pDraw) {
 
     int memory_x = x / 8;
     for (int plane = 0; plane < 4; plane++) {
-        bus_write(0x3CF, (1 << plane), true);
+        bus_write(0x3C4, 2, true);
+        bus_write(0x3C5, (1 << plane), true);
 
         for (int i = 0; i < width; i+=8, memory_x++) {
             // 8 pixels at a time

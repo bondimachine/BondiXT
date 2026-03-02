@@ -12,6 +12,8 @@ unsigned char *text_buffer;
 uint8_t current_video_mode = 0x13;
 
 
+uint8_t current_sequencer_index = 0;
+
 // VGA register emulation for mode 10h
 uint8_t vga_write_plane_mask = 0x0F;  // Sequencer Map Mask Register (index 2) - all planes enabled by default
 
@@ -328,7 +330,14 @@ inline void crtc_register_set(uint8_t value) {
   }
 }
 
-void processIO(uint16_t address, uint8_t value, bool is_write) {
+uint8_t processIO(uint16_t address, uint8_t value, bool is_write) {
+  if (!is_write) {
+    // For now, we only support reading from the status register to check vsync
+    if (address == 0x3DA) {
+      return vsync_flag ? 0x8 : 0x0; // Bit 3 is VSYNC status
+    }
+    return 0;
+  }
   switch (address) {
 
     case 0x3D4:
@@ -373,14 +382,23 @@ void processIO(uint16_t address, uint8_t value, bool is_write) {
         current_video_mode = 0x13;
       }
       break;
-    case 0x3CF: 
-      // graphics mode data register
-      vga_write_plane_mask = value & 0x0F;
+
+    case 0x3c4:
+      // Sequencer Index Register
+      current_sequencer_index = value;
+      break;  
+
+    case 0x3c5:
+      // Sequencer Data Register - we only care about index 2 (Map Mask)
+      if (current_sequencer_index == 2) {
+        vga_write_plane_mask = value & 0x0F;
+      }
       break;
-  }  
+  }
+  return 0;
 }
 
-void processMemoryBusMessage(uint32_t address, uint8_t value, bool is_write = true) {
+uint8_t processMemoryBusMessage(uint32_t address, uint8_t value, bool is_write = true) {
   if (address < 0xB0000) {
     updateVGAByte(address - 0xA0000, value);
   } else if (address >= 0xB8000) {
@@ -388,4 +406,5 @@ void processMemoryBusMessage(uint32_t address, uint8_t value, bool is_write = tr
   } else {
     // TODO: hercules support
   }
+  return 0;
 }

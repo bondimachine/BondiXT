@@ -22,6 +22,7 @@
 .define DEN 15
 .define CS 15
 .define MUX 16
+.define IOCHRDY 28
 
     set x, 1           
 
@@ -45,9 +46,17 @@ restart:
 
     jmp pin write
 
-    in NULL, 8 ; Push the read request
+    mov osr, x           ; Flag CHORDY
+    out pindirs, 1
+    mov osr, NULL
+    out pins, 1
 
-    ; for the moment, ignore reads
+    in NULL, 8           ; Push the read request.
+
+    ; IOCHRDY will be released by read part, we just wait here until everything is done.
+    wait 0 gpio DEN
+    wait 1 gpio DEN
+
     jmp restart
 
 write:
@@ -69,7 +78,7 @@ static inline void bus_program_init(PIO pio, uint sm, uint offset, uint base_pin
     // Map the state machine's IN pin group to D0..D16
     sm_config_set_in_pins(&c, base_pin);
 
-    sm_config_set_out_pins(&c, base_pin, 8);
+    sm_config_set_out_pins(&c, 28, 1);
 
     sm_config_set_jmp_pin(&c, 14);
 
@@ -87,7 +96,7 @@ static inline void bus_program_init(PIO pio, uint sm, uint offset, uint base_pin
     pio_sm_set_consecutive_pindirs(pio, sm, base_pin, 16, false);
 
     pio_sm_set_consecutive_pindirs(pio, sm, 16, 1, true); // MUX pin as output
-    pio_sm_set_consecutive_pindirs(pio, sm, 28, 1, true); // IOCHRDY pin as output
+    pio_sm_set_consecutive_pindirs(pio, sm, 28, 1, false); // IOCHRDY pin as higih impedance 
 
     // Shift in configuration left and auto push with 27 bits
     sm_config_set_in_shift(&c, false, true, 27);
