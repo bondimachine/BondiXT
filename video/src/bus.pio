@@ -28,7 +28,7 @@
 
 .wrap_target
 restart:
-    set pins, 0 [10]     ; Set MUX back to select D0-D14. Delays 2 to wait for the change to propagate
+    set pins, 0 [5]     ; Set MUX back to select D0-D14. Delays 2 to wait for the change to propagate
 
     wait 1 gpio CS        ; Wait for CS high
     ; 1. Wait for !CS
@@ -38,7 +38,7 @@ restart:
 
     ; 2. Save D0-D14 in addr register (ISR)
     in pins, 15          ; Shift 15 bits from pins into ISR
-    set pins, 1   [10]       ; Set MUX to select A15/A16/IO/M/DT/R . 
+    set pins, 1   [5]       ; Set MUX to select A15/A16/IO/M/DT/R . 
 
     mov osr, pins
     out NULL, 11         ; Discard D0-D10 which are still in the pins

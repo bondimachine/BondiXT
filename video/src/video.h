@@ -13,6 +13,8 @@ uint8_t current_video_mode = 0x13;
 
 
 uint8_t current_sequencer_index = 0;
+uint8_t current_graphics_controller_index = 0;
+uint8_t read_map = 0; // Read Map register - determines which plane is read during CPU reads in graphics modes
 
 // VGA register emulation for mode 10h
 uint8_t vga_write_plane_mask = 0x0F;  // Sequencer Map Mask Register (index 2) - all planes enabled by default
@@ -330,6 +332,120 @@ inline void crtc_register_set(uint8_t value) {
   }
 }
 
+inline uint8_t readCGAByte(uint16_t offset) {
+
+  // Update CGA Memory Byte
+  // offset: 0x0000 - 0x3FFF (16KB CGA Memory)
+  // val: 8-bit value containing 4 pixels OR 8 pixels depending on mode, or the text character/attribute in text mode
+
+  // CGA Memory Layout:
+  // Bank 0 (Even lines): 0x0000 - 0x1FFF
+  // Bank 1 (Odd lines):  0x2000 - 0x3FFF
+  // Line width: 80 bytes (320/640 pixels)
+
+  int cga_y;
+  int cga_x_byte;
+
+  if (current_video_mode == 0x2) {
+    return text_buffer[offset];
+  } else if (current_video_mode == 0x6) {
+    // CGA Graphics Mode 6: 640x200, 2 colors (1 bit per pixel)
+    // Each byte contains 8 pixels: P0 P1 P2 P3 P4 P5 P6 P7 (High bits -> Low bits)
+
+    cga_y = (offset / 80);
+    cga_x_byte = offset % 80;
+    uint8_t val = 0;
+    for (int i = 0; i < 8; i++) {
+      int cga_x = cga_x_byte * 8 + i;
+      // Each CGA pixel becomes a 1x2 VGA block
+      uint8_t pixel = ((640 * cga_y * 2) + cga_x);
+      val = val | (vga_data_array[pixel] == WHITE ? (1 << (7 - i)) : 0);
+    }
+    return val;
+  } else {
+    if (offset < 0x2000) {
+      // Bank 0 (Even lines)
+      cga_y = (offset / 80) * 2;
+      cga_x_byte = offset % 80;
+    } else {
+      // Bank 1 (Odd lines)
+      cga_y = ((offset - 0x2000) / 80) * 2 + 1;
+      cga_x_byte = (offset - 0x2000) % 80;
+    }
+
+    // CGA Graphics Mode 4: 320x200, 4 colors (2 bits per pixel)}
+    // Each byte contains 4 pixels: P0 P1 P2 P3 (High bits -> Low bits)
+    // P0: bits 7-6
+    // P1: bits 5-4
+    // P2: bits 3-2
+    // P3: bits 1-0
+
+    uint8_t val = 0;
+    for (int i = 0; i < 4; i++) {
+      
+      int cga_x = cga_x_byte * 4 + i;
+      uint8_t pixel = ((640 * cga_y * 2) + cga_x);
+
+      uint8_t color = vga_data_array[pixel];
+
+      if (color == BLACK) {
+        // leave bits as 00
+      } else if (color == CGA_PALETTE4_0[1] || color == CGA_PALETTE4_1[1]) {
+        color = 0b01;
+      } else if (color == CGA_PALETTE4_0[2] || color == CGA_PALETTE4_1[2]) {
+        color = 0b10;
+      } else {
+        color = 0b11;
+      }
+
+      val = val | (color << (6 - (i * 2)));
+    }
+    return val;
+  }  
+}
+
+inline uint8_t readVGAByte(uint16_t offset) {
+  if (current_video_mode == 0x10 || current_video_mode == 0x12) {
+    // only support read mode 0
+    int max_rows = (current_video_mode == 0x12) ? 480 : 350;
+
+    // Calculate the starting pixel position
+    // 640 pixels wide, so 80 bytes per row
+    int byte_x = offset % 80;  // Which byte in the row (0-79)
+    int pixel_y = offset / 80; // Which row
+    int pixel_x_base = byte_x * 8; // Starting X position (each byte = 8 pixels)
+
+    if (pixel_y >= max_rows) {
+      return 0; // Out of visible area
+    }
+
+    uint8_t val = 0;
+    // Update all 8 pixels represented by this byte
+    for (int bit = 0; bit < 8; bit++) {
+      int pixel_x = pixel_x_base + bit;
+      int pixel_offset = pixel_y * 640 + pixel_x;
+      
+      // Bit 7 is leftmost pixel, bit 0 is rightmost
+      int bit_position = 7 - bit;
+      
+      // Read current pixel color and find its palette index using precomputed table
+      uint8_t current_color = vga_data_array[pixel_offset];
+      uint8_t current_index = (CGA_PALETTE16_REVERSE[current_color & 0x3F]); 
+      
+      // read_map determines which plane's bit is returned during reads
+      val = val | (((current_index >> read_map) & 1) << bit_position);
+    }
+    return val;      
+  } else {
+    // VGA Mode 13h: 320x200, 256 colors
+    int vga_x = (offset % 320) * 2;
+    int vga_y = (offset / 320) * 2;
+    int pixel_offset = vga_y * 640 + vga_x;
+    return vga_data_array[pixel_offset];
+
+  }  
+}    
+
 uint8_t processIO(uint16_t address, uint8_t value, bool is_write) {
   if (!is_write) {
     // For now, we only support reading from the status register to check vsync
@@ -394,15 +510,33 @@ uint8_t processIO(uint16_t address, uint8_t value, bool is_write) {
         vga_write_plane_mask = value & 0x0F;
       }
       break;
+    
+    case 0x3ce:
+      current_graphics_controller_index = value;
+      break;  
+
+    case 0x3cf:
+      // Graphics Controller Data Register - we only care about index 5 (Graphics Mode)
+      read_map = value;
+      break;
   }
+
   return 0;
 }
 
 uint8_t processMemoryBusMessage(uint32_t address, uint8_t value, bool is_write = true) {
   if (address < 0xB0000) {
-    updateVGAByte(address - 0xA0000, value);
+    if (is_write) {
+      updateVGAByte(address - 0xA0000, value);
+    } else {
+      return readVGAByte(address - 0xA0000);
+    }  
   } else if (address >= 0xB8000) {
-    updateCGAByte(address - 0xB8000, value);
+    if (is_write) {
+      updateCGAByte(address - 0xB8000, value);
+    } else {
+      return readCGAByte(address - 0xB8000);
+    }
   } else {
     // TODO: hercules support
   }
