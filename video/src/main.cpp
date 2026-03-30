@@ -17,7 +17,7 @@
  *  - GPIO 12 -> A12 / A16
  *  - GPIO 13 -> A13 / IO/M
  *  - GPIO 14 -> A14 / DT/R
- *  - GPIO 15 -> /CS / DEN
+ *  - GPIO 15 -> /CS / (\WR & \RD)
  *  - GPIO 16 ---> MUX select [sideset]
  *  - GPIO 17 ---> 1k ohm resistor ---> VGA Red
  *  - GPIO 18 ---> 330 ohm resistor ---> VGA Red
@@ -96,7 +96,10 @@ bool cursor_timer_callback(repeating_timer_t* ignored) {
 
 void setup() {
   Serial.begin(115200);
+  delay(5000);
   Serial.println("BondiXT Video Card Initializing...");
+
+  init_planar_write_lut();
 
   // --- Bus Interface Initialization ---
   // Using PIO0 for the Bus Interface
@@ -280,6 +283,7 @@ void loop1() {
 
     uint8_t result;
     if (is_io) {
+      // Serial.printf("Bus Message: Data: 0x%08X, Addr: 0x%05X, Value: 0x%02X io: %d write: %d\n", data, full_address, value, is_io, is_write);
       result = processIO((uint16_t)full_address, value, is_write);
     } else {
       result = processMemoryBusMessage(full_address + 0xA0000, value, is_write);
@@ -354,6 +358,8 @@ void demo(int color) {
 
 // int color = 0; 
 void loop() {
+  // drawing text on each memory access is too slow, so instead we set a dirty flag and redraw the whole screen in the main loop if needed
+  draw_text_screen();
   // demo(color);
   // color = (color + 1) % 64;
 }

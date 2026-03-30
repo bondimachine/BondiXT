@@ -10,7 +10,7 @@
 ; 3. Switch MUX [pin 16]
 ; 4. Read A15 and A16. Read IO/M and DT/R
 ; 5. If DT/R is high: (write)
-;    ; 6. Wait for !DEN
+;    ; 6. Wait for /WR to be low
 ;    ; 7. Read 8-bit Data (D0-D7)
 ;    ; 8. Push Address and Data to FIFO
 ;    ; 9. Switch MUX back 
@@ -19,7 +19,7 @@
 ; Pin Mapping Assumption:
 ; - IN pins base is mapped to D0
 
-.define DEN 15
+.define WRRD 15
 .define CS 15
 .define MUX 16
 .define IOCHRDY 28
@@ -54,21 +54,20 @@ restart:
     in NULL, 8           ; Push the read request.
 
     ; IOCHRDY will be released by read part, we just wait here until everything is done.
-    wait 0 gpio DEN
-    wait 1 gpio DEN
+    wait 0 gpio WRRD
+    wait 1 gpio WRRD
 
     jmp restart
 
 write:
-    ; 3. Wait for DEN to be down
-    wait 0 gpio DEN
+    ; 3. Wait for /WR to be down
+    wait 0 gpio WRRD [1]
 
 
     ; 4. Save D0-D7 to data register (ISR)
     in pins, 8           ; Shift 8 bits from pins into ISR
                          ; ISR now contains [A14-A0 << 12 | DT/R << 11 | IO/R << 10 | A16-A15 << 8 | Data (8)]
                          ; Also it is autopushed to RX FIFO
-
 .wrap
 
 % c-sdk {

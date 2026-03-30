@@ -103,6 +103,7 @@ init_video:
 
 
 int10_handler:
+    push bx
     push cx
     push dx
     push si
@@ -142,6 +143,7 @@ int10_handler:
 
 .set_video_mode:
 
+    mov ah, al ; save requested mode in ah for later use in special functions
     cmp al, 0x02 ; 80x25 monochrome text mode
     je .set_mode_text
 
@@ -170,17 +172,17 @@ int10_handler:
 
 .set_mode_text:
     mov dx, 0x3D8
-    mov al, 0xA ; high res text mode, output enabled
+    mov al, 0b01001 ; high res text mode, output enabled
     jmp .set_save_and_done
 
 .set_mode_cga:
     mov dx, 0x3D8
-    mov al, 0x6 ; low res graphics mode, output enabled
+    mov al, 0b01010 ; low res graphics mode, output enabled
     jmp .set_save_and_done
 
 .set_mode_cga_high_res:
     mov dx, 0x3D8
-    mov al, 0xE ; high res graphics mode, output enabled
+    mov al, 0b11010 ; high res graphics mode, output enabled
     jmp .set_save_and_done
 
 .set_mode_ega:
@@ -202,7 +204,7 @@ int10_handler:
     out dx, al
     mov dx, 0x40
     mov es, dx
-    mov byte [es:DATA_AREA_VIDEO_MODE], al
+    mov byte [es:DATA_AREA_VIDEO_MODE], ah
     jmp .done
 
 .set_palette_cga:
@@ -321,6 +323,12 @@ int10_handler:
     cmp al, 0x0A
     je .teletype_lf
 
+    ; Handle backspace (BS, 0x08)
+    cmp al, 0x8
+    je .teletype_bs
+
+    mov bx, ax ; save character in bx for later use in text mode update
+
     ; Write character to video memory
     mov ax, 0x40
     mov es, ax
@@ -342,7 +350,7 @@ int10_handler:
     ; Write to video memory at B8000
     mov ax, 0xb800
     mov es, ax
-    mov byte [es:si], al      ; character
+    mov byte [es:si], bl      ; character
     mov byte [es:si+1], 0x07  ; attribute (white on black)
 
     ; Increment cursor X
@@ -387,12 +395,22 @@ int10_handler:
 
     jmp .done
 
+.teletype_bs:
+    mov ax, 0x40
+    mov es, ax
+    cmp byte [es:DATA_AREA_CURSOR_X], 0
+    je .done ; if we're at the beginning of the line, do nothing
+
+    dec byte [es:DATA_AREA_CURSOR_X]
+    jmp .teletype_update_hw
+
 .done:
 
     pop es
     pop si
     pop dx
     pop cx
+    pop bx
 
     iret
 

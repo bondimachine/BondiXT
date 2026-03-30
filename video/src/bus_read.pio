@@ -8,12 +8,12 @@
 ; 1. Wait for TX FIFO to have data (indicating a read request)
 ; 2. Set pins as output (D0-D7) and output the data from the FIFO
 ; 3. Set IOCHRDY (pin 28) to read/high impedance to indicate data is ready
-; 4. Wait for DEN to be toggled down
-; 5. Wait for DEN to be toggled up
+; 4. Wait for /RW to be toggled down
+; 5. Wait for /RW to be toggled up
 ; 6. Set pins as input
 
 
-.define DEN 15
+.define WRRD 15
 .define IOCHRDY 28
 
 .wrap_target
@@ -30,11 +30,11 @@
     ; 3. Set IOCHRDY to input (high-Z)
     set pindirs, 0     ; Set pin 28 to input (high-Z)
     
-    ; 4. Wait for DEN to be toggled down
-    wait 0 gpio DEN    
+    ; 4. Wait for /RW to be toggled down
+    wait 0 gpio WRRD    
     
-    ; 5. Wait for DEN to be toggled up
-    wait 1 gpio DEN    
+    ; 5. Wait for /RW to be toggled up
+    wait 1 gpio WRRD
     
     ; 6. Set pins as input
     mov osr, NULL      ; Prepare all 0s

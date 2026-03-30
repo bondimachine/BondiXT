@@ -1,5 +1,6 @@
 ORG 0x7C00            ; Boot sector starts at 0x7C00
 
+CPU 8086
 BITS 16               ; Use 16-bit real mode instructions
 
 start:
@@ -35,9 +36,9 @@ continue:
 
 
 print_string:
-    mov ah, 0x0E          ; Teletype function
     mov bx, 0             ; Page 0
 print_loop:
+    mov ah, 0x0E          ; Teletype function
     lodsb
     cmp al, 0
     je end_print

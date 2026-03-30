@@ -7,6 +7,7 @@ unsigned char vga_data_array[FRAME_BUFFER_SIZE];
 unsigned char *address_pointer = &vga_data_array[0];
 
 unsigned char *text_buffer;
+bool text_buffer_dirty = false;
 
 // VGA video mode - 0x10 for mode 10h, 0x13 for mode 13h
 uint8_t current_video_mode = 0x13;
@@ -52,6 +53,23 @@ const uint8_t CGA_PALETTE16_REVERSE[64] = {
     1,  0,  0,  0,  0,  0,  0,  0,  3,  0,  7,  0,  0,  0,  0,  0,  // 32-47  (32=BLUE, 40=CYAN, 42=LIGHT_GRAY)
     0,  0,  0,  5,  0,  9,  0, 13,  0,  0,  0,  0,  0, 11,  0, 15,  // 48-63  (51=MAGENTA, 53=LIGHT_BLUE, 55=LIGHT_MAGENTA, 61=LIGHT_CYAN, 63=WHITE)
 };
+
+// Precomputed LUT for planar writes: maps (plane_mask, current_6bit_color, incoming_bit) -> new_6bit_color
+// Eliminates both forward and reverse palette lookups from the inner pixel loop
+uint8_t planar_write_lut[16][64][2];
+
+void init_planar_write_lut() {
+  for (int mask = 0; mask < 16; mask++) {
+    for (int color6 = 0; color6 < 64; color6++) {
+      uint8_t current_index = CGA_PALETTE16_REVERSE[color6];
+      uint8_t keep_mask = ~mask & 0x0F;
+      // incoming_bit = 0: clear masked planes
+      planar_write_lut[mask][color6][0] = CGA_PALETTE16[current_index & keep_mask];
+      // incoming_bit = 1: set masked planes
+      planar_write_lut[mask][color6][1] = CGA_PALETTE16[(current_index & keep_mask) | mask];
+    }
+  }
+}
 
 // CGA Palette Definitions
 // We only have 8 colors, so we map CGA colors to the closest available
@@ -108,6 +126,20 @@ inline void render_char(uint16_t vga_x, uint16_t vga_y, uint8_t char_code, uint8
   }  
 }
 
+inline void updateTextModeBuffer(uint16_t offset, uint8_t val) {
+    // CGA Text Mode: 80x25 characters, each character is 2 bytes (char + attribute)
+    // Each byte represents either the character code or the attribute for a single character cell
+    // We will ignore attributes for now and just render the character glyphs in white
+
+    uint16_t vga_y = (offset / 160) * 16; // Each line has 80 chars * 2 bytes/char = 160 bytes
+    uint16_t vga_x = ((offset % 160) / 2) * 8; // Which character in the line (0-79)
+    bool is_char_byte = (offset % 2 == 0); // Even byte = char code, Odd byte = attribute
+    uint8_t char_code = is_char_byte ? val : text_buffer[offset - 1]; // Get char code from even byte
+    uint8_t attr = is_char_byte ? text_buffer[offset + 1] : val;
+    text_buffer[offset] = val; // Update text buffer with the new value (char or attribute)
+    text_buffer_dirty = true;
+}
+
 void updateCGAByte(uint16_t offset, uint8_t val) {
 
   // Update CGA Memory Byte
@@ -123,19 +155,7 @@ void updateCGAByte(uint16_t offset, uint8_t val) {
   int cga_x_byte;
 
   if (current_video_mode == 0x2) {
-    // CGA Text Mode: 80x25 characters, each character is 2 bytes (char + attribute)
-    // Each byte represents either the character code or the attribute for a single character cell
-    // We will ignore attributes for now and just render the character glyphs in white
-
-    uint16_t vga_y = (offset / 160) * 16; // Each line has 80 chars * 2 bytes/char = 160 bytes
-    uint16_t vga_x = ((offset % 160) / 2) * 8; // Which character in the line (0-79)
-    bool is_char_byte = (offset % 2 == 0); // Even byte = char code, Odd byte = attribute
-    uint8_t char_code = is_char_byte ? val : text_buffer[offset - 1]; // Get char code from even byte
-    uint8_t attr = is_char_byte ? text_buffer[offset + 1] : val;
-    text_buffer[offset] = val; // Update text buffer with the new value (char or attribute)
-
-    render_char(vga_x, vga_y, char_code, attr);
-
+    updateTextModeBuffer(offset, val);
   } else if (current_video_mode == 0x6) {
     // CGA Graphics Mode 6: 640x200, 2 colors (1 bit per pixel)
     // Each byte contains 8 pixels: P0 P1 P2 P3 P4 P5 P6 P7 (High bits -> Low bits)
@@ -217,33 +237,14 @@ void updateVGAByte(uint16_t offset, uint8_t val) {
       return; // Out of visible area
     }
 
-    // Update all 8 pixels represented by this byte
+    // Cache LUT pointer for current plane mask (avoids re-indexing each pixel)
+    const uint8_t (*lut)[2] = planar_write_lut[vga_write_plane_mask];
+    int row_offset = pixel_y * 640 + pixel_x_base;
+
+    // Update all 8 pixels - single LUT access per pixel
     for (int bit = 0; bit < 8; bit++) {
-      int pixel_x = pixel_x_base + bit;
-      int pixel_offset = pixel_y * 640 + pixel_x;
-      
-      // Bit 7 is leftmost pixel, bit 0 is rightmost
-      int bit_position = 7 - bit;
-      uint8_t incoming_bit = (val >> bit_position) & 1;
-      
-      // Read current pixel color and find its palette index using precomputed table
-      uint8_t current_color = vga_data_array[pixel_offset];
-      uint8_t current_index = CGA_PALETTE16_REVERSE[current_color & 0x3F];
-      
-      // Modify the bits for the planes being written
-      uint8_t new_index = current_index;
-      for (int plane = 0; plane < 4; plane++) {
-        if (vga_write_plane_mask & (1 << plane)) {
-          // Update this plane's bit with the incoming bit
-          if (incoming_bit) {
-            new_index |= (1 << plane);
-          } else {
-            new_index &= ~(1 << plane);
-          }
-        }
-      }
-      // Write the new color
-      vga_data_array[pixel_offset] = CGA_PALETTE16[new_index];
+      uint8_t incoming_bit = (val >> (7 - bit)) & 1;
+      vga_data_array[row_offset + bit] = lut[vga_data_array[row_offset + bit]][incoming_bit];
     }
   } else {
     // VGA Mode 13h: 320x200, 256 colors
@@ -268,6 +269,10 @@ void updateVGAByte(uint16_t offset, uint8_t val) {
 }
 
 void draw_text_screen() {
+  if (current_video_mode != 0x2 || !text_buffer_dirty) {
+    return;
+  }
+  text_buffer_dirty = false;
   uint16_t vga_x = 0;
   uint16_t vga_y = 0;
   for (uint16_t offset = 0; offset < 4000 ; offset += 2) {
@@ -298,7 +303,7 @@ void scroll_text(int8_t lines) {
     text_buffer[offset + 1] = 0x7;
   }
 
-  draw_text_screen();
+  text_buffer_dirty = true;
 }
 
 bool cursor_state = false;
@@ -467,7 +472,7 @@ uint8_t processIO(uint16_t address, uint8_t value, bool is_write) {
     case 0x3D8:
       // CGA Mode control register
       if (value & 0x2) { // graphics mode
-        if (value & 0x8) {
+        if (value & 0x10) {
           current_video_mode = 0x6; // 640x200 mono
         } else {
           current_video_mode = 0x4; // 320x200 color
@@ -538,7 +543,12 @@ uint8_t processMemoryBusMessage(uint32_t address, uint8_t value, bool is_write =
       return readCGAByte(address - 0xB8000);
     }
   } else {
-    // TODO: hercules support
+    // we only support mda in text mode
+    if (is_write) {
+      updateTextModeBuffer(address - 0xB0000, value);
+    } else {
+      return text_buffer[address - 0xB0000];
+    }
   }
   return 0;
 }

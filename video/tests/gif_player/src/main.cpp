@@ -1,8 +1,7 @@
 #include <Arduino.h>
 #include <AnimatedGIF.h>
 #include <LittleFS.h>
-#define HALF_CLOCK() __asm ("nop; nop; nop; nop; nop; nop; nop; nop; \
-    nop; nop; nop; nop; nop; nop; nop; nop;")
+#define HALF_CLOCK() __asm ("nop; nop; nop; nop; nop; nop; nop; nop;")
 
 // Pin Definitions
 const uint8_t PIN_BUS_BASE = 0; // D0-D15
@@ -77,6 +76,7 @@ void bus_write(uint32_t address, uint8_t data, bool io = false) {
     gpio_put(PIN_CS, 1);
 
     HALF_CLOCK();
+
 }
 
 uint8_t cga_color(uint8_t gif_pixel) {
@@ -512,20 +512,20 @@ uint8_t play_type(const char *szFilename, uint8_t start_y = 0) {
 uint8_t line = 0;
 void loop() {
 
-    // bus_write(0x3d8, 0, true);
+    // bus_write(0x3d8, 0b01001, true);
     // bus_write(0x3df, 0, true); // cls
     // line = play_type("/DIR.TXT", line);
     // play_ansi("/rick_short.ans");
     // line = play_ansi("/DIR.TXT", line);
 
     // play("/stan_cga.gif", GIFDrawCGA);
-    // play("/stan_vga.gif", GIFDrawVGA13h);
+    play("/stan_vga.gif", GIFDrawVGA13h);
     #if MAX_WIDTH < 640
         #error "MAX_WIDTH must be at least 640 for VGA test"
     #endif
-    bus_write(0x3c2, 0xe3, true);
-    play("/win31.gif", GIFDrawVGA12h);
-    // bus_write(0x3d8, 0b1010, true);
+    // bus_write(0x3c2, 0xe3, true);
+    // play("/win31.gif", GIFDrawVGA12h);
+    // bus_write(0x3d8, 0b11010, true);
     // play("/simcity.gif", GIFDrawCGAHiRes);
     // bus_test();
     // pattern_test();
