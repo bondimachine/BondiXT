@@ -96,7 +96,6 @@ bool cursor_timer_callback(repeating_timer_t* ignored) {
 
 void setup() {
   Serial.begin(115200);
-  delay(5000);
   Serial.println("BondiXT Video Card Initializing...");
 
   init_planar_write_lut();
@@ -251,6 +250,10 @@ void setup() {
   while (!text_buffer) {
     Serial.println("Error: Could not allocate text buffer");
   }
+
+  memcpy(text_buffer, "W\x07" "e\x07" "l\x07" "c\x07" "o\x07" "m\x07" "e\x07" " \x07" "t\x07" "o\x07" " \x07" "B\x041" "o\x062" "n\x053" "d\x014" "i\x035" "V\x026" "G\x0F8" "A\x09" "!\x00A", 41);
+  cursor_offset = 160; // Set cursor to second line
+  text_buffer_dirty = true;
 
   add_repeating_timer_ms(500, cursor_timer_callback, NULL, &cursor_timer);
 }

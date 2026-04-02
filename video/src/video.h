@@ -9,8 +9,12 @@ unsigned char *address_pointer = &vga_data_array[0];
 unsigned char *text_buffer;
 bool text_buffer_dirty = false;
 
-// VGA video mode - 0x10 for mode 10h, 0x13 for mode 13h
-uint8_t current_video_mode = 0x13;
+// Small correction for the first visible pixel column in text mode.
+// The first rendered pixel is currently being shifted off-screen by the VGA timing,
+// so we draw text one pixel to the right.
+static const uint16_t TEXT_MODE_X_OFFSET = 1;
+
+uint8_t current_video_mode = 0x2; // Start in text mode by default
 
 
 uint8_t current_sequencer_index = 0;
@@ -106,7 +110,6 @@ uint8_t getCGAColor(uint8_t color_idx) {
 inline void drawPixel(uint16_t x, uint16_t y, uint8_t color) {
   // Which pixel is it?
   int pixel = ((640 * y) + x);
-
   vga_data_array[pixel] = color;
 }
 
@@ -273,13 +276,13 @@ void draw_text_screen() {
     return;
   }
   text_buffer_dirty = false;
-  uint16_t vga_x = 0;
+  uint16_t vga_x = TEXT_MODE_X_OFFSET;
   uint16_t vga_y = 0;
   for (uint16_t offset = 0; offset < 4000 ; offset += 2) {
     render_char(vga_x, vga_y, text_buffer[offset], text_buffer[offset + 1]);
     vga_x += 8;
     if (vga_x >= 640) {
-      vga_x = 0;
+      vga_x = TEXT_MODE_X_OFFSET;
       vga_y += 16;
     }
   }
@@ -312,7 +315,7 @@ void render_cursor(bool show) {
   if (current_video_mode == 0x2) {
 
     uint16_t vga_y = (cursor_offset / 160) * 16; // Each line has 80 chars * 2 bytes/char = 160 bytes
-    uint16_t vga_x = ((cursor_offset % 160) / 2) * 8; // Which character in the line (0-79)
+    uint16_t vga_x = (((cursor_offset % 160) / 2) * 8) + TEXT_MODE_X_OFFSET; // Which character in the line (0-79)
 
     for (int row = 14; row < 16; row++) {
       for (int col = 0; col < 8; col++) {
