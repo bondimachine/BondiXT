@@ -75,19 +75,12 @@ void init_planar_write_lut() {
   }
 }
 
-// CGA Palette Definitions
-// We only have 8 colors, so we map CGA colors to the closest available
-const uint8_t CGA_PALETTE4_0[4] = {BLACK, GREEN, RED,
-                                  YELLOW}; // Green, Red, Brown
-const uint8_t CGA_PALETTE4_1[4] = {BLACK, CYAN, MAGENTA,
-                                  WHITE}; // Cyan, Magenta, White
-
+uint8_t CGA_PALETTE4[4] = {BLACK, CYAN, MAGENTA, WHITE}; // Default to palette 1
 
 #include "vga_palette.h"
 #include "font.h"
 
 // Current palette selection (0 or 1)
-uint8_t current_palette_idx = 1;
 bool volatile vsync_flag = false;
 
 uint8_t crtc_register_latch = 0;
@@ -95,12 +88,8 @@ uint16_t cursor_offset = 0;
 uint8_t next_cursor_offset_hi = 0;
 
 // Helper to get color from current palette
-uint8_t getCGAColor(uint8_t color_idx) {
-  if (current_palette_idx == 0) {
-    return CGA_PALETTE4_0[color_idx & 3];
-  } else {
-    return CGA_PALETTE4_1[color_idx & 3];
-  }
+inline uint8_t getCGAColor(uint8_t color_idx) {
+    return CGA_PALETTE4[color_idx & 3];
 }
 
 // A function for drawing a pixel with a specified color.
@@ -198,22 +187,22 @@ void updateCGAByte(uint16_t offset, uint8_t val) {
     // P2: bits 3-2
     // P3: bits 1-0
 
+    int vga_y_base = cga_y * 2;
+    int base_vga_x = cga_x_byte * 8;
     for (int i = 0; i < 4; i++) {
       uint8_t pixel_val = (val >> (6 - (i * 2))) & 0b11;
       uint8_t color = getCGAColor(pixel_val);
 
-      int cga_x = cga_x_byte * 4 + i;
+      int vga_x = base_vga_x + i * 2;
+      int pixel0 = 640 * vga_y_base + vga_x;
+      int pixel1 = pixel0 + 1;
+      int pixel2 = pixel0 + 640;
+      int pixel3 = pixel2 + 1;
 
-      // Scale to VGA (2x)
-      // CGA 320x200 -> VGA 640x400
-      // Each CGA pixel becomes a 2x2 VGA block
-      int vga_x = cga_x * 2;
-      int vga_y = cga_y * 2;
-
-      drawPixel(vga_x, vga_y, color);
-      drawPixel(vga_x + 1, vga_y, color);
-      drawPixel(vga_x, vga_y + 1, color);
-      drawPixel(vga_x + 1, vga_y + 1, color);
+      vga_data_array[pixel0] = color;
+      vga_data_array[pixel1] = color;
+      vga_data_array[pixel2] = color;
+      vga_data_array[pixel3] = color;
     }
   }  
 }
@@ -398,9 +387,9 @@ inline uint8_t readCGAByte(uint16_t offset) {
 
       if (color == BLACK) {
         // leave bits as 00
-      } else if (color == CGA_PALETTE4_0[1] || color == CGA_PALETTE4_1[1]) {
+      } else if (color == GREEN || color == LIGHT_GREEN || color == CYAN || color == LIGHT_CYAN) {
         color = 0b01;
-      } else if (color == CGA_PALETTE4_0[2] || color == CGA_PALETTE4_1[2]) {
+      } else if (color == RED || color == LIGHT_RED || color == MAGENTA || color == LIGHT_MAGENTA) {
         color = 0b10;
       } else {
         color = 0b11;
@@ -484,11 +473,23 @@ uint8_t processIO(uint16_t address, uint8_t value, bool is_write) {
         current_video_mode = 0x2; // 80x25 text
       }
       break;
-    case 0x3D9:
+    case 0x3D9: {
       // CGA Color control register
-      current_palette_idx = (value & 0x10);
-      break;
+      bool intensity = value & 0x10;
+      if (value & 0x20) {
+         CGA_PALETTE4[1] = intensity ? LIGHT_CYAN : CYAN;
+         CGA_PALETTE4[2] = intensity ? LIGHT_MAGENTA : MAGENTA;
+         CGA_PALETTE4[3] = intensity ? LIGHT_GRAY : WHITE;
+      } else {
+         CGA_PALETTE4[1] = intensity ? LIGHT_GREEN : GREEN;
+         CGA_PALETTE4[2] = intensity ? LIGHT_RED : RED;
+         CGA_PALETTE4[3] = intensity ? YELLOW : BROWN;
+      }
 
+      CGA_PALETTE4[0] = CGA_PALETTE16[value & 0x0F]; // Set background color based on lower 4 bits (same mapping as graphics modes)
+
+      break;
+    }  
     // Our own text scrolling. 
     case 0x3de:
       // Placeholder for full scrolling params, for the moment we just ignore   

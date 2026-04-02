@@ -1,6 +1,7 @@
 DATA_AREA_VIDEO_MODE EQU 0x49
 DATA_AREA_CURSOR_X EQU 0x50
 DATA_AREA_CURSOR_Y EQU 0x51
+DATA_AREA_VIDEO_CGA_PALETTE equ	66h
 
 init_video:
     ; set default video mode to 80x25 color text mode
@@ -10,94 +11,10 @@ init_video:
 
     mov byte [es:DATA_AREA_CURSOR_X], 0
     mov byte [es:DATA_AREA_CURSOR_Y], 0
-;     mov dx, 0x3da
-;     in al, dx ; reset the flip-flop by reading the input status register
 
-;     mov dx, 0x3c0
-;     mov si, atc80x25
-;     mov cx, 20
-;     xor bl, bl
-;     cld
-; .next_reg_atc:
-;     mov al, bl
-;     out dx, al
-;     lodsb
-;     out dx, al
-;     inc bl
-;     loop .next_reg_atc
-
-; ; idk why people doesn't just include the 0x14 register in the atc80x25 array, but whatever, let's just write it here
-;     mov al, 0x14
-;     out dx, al
-;     mov al, 0x00 ; disable overscan color (set to black)
-;     out dx, al
-
-;     mov  dx, 0x3c4
-;     mov  ax, 0x0300
-;     out  dx, ax
-  
-;     mov si, sequ80x25
-;     mov cx, 4
-;     xor bl, bl
-;     cld
-; .next_reg_sequ:
-;     lodsb
-;     mov ah, al
-;     mov al, bl
-;     out dx, ax
-;     inc bl
-;     loop .next_reg_sequ
-
-;     mov dx, 0x3ce
-;     mov si, grdc80x25
-;     mov cx, 9
-;     xor bl, bl
-;     cld
-; .next_reg_grdc:
-;     lodsb
-;     mov ah, al
-;     mov al, bl
-;     out dx, ax
-;     inc bl
-;     loop .next_reg_grdc
-
-;     mov dx, 0x3c2
-;     mov al, 0x67 
-;     out dx, al
-    
-;     mov dx, 0x3D4
-;     mov ax, 0x0011
-;     out dx, ax
-
-;     mov si, crtc80x25
-;     mov cx, 0x19
-;     xor bl, bl
-; .next_reg:
-;     lodsb
-;     mov ah, al
-;     mov al, bl
-;     out dx, ax
-;     inc bl
-;     loop .next_reg
-
-;     mov dx, 0x3c0
-;     mov al, 0x20 ; unblank the screen
-;     out dx, al
-
-;     ; set font
-
-;     xor ax, ax
-;     mov es, ax
-;     mov bx, 0x2596 ; offset of the 8x16 font in the bios rom
-;     mov ax, 0xc000
-;     mov  [es:0x010c], bx ;; INT 0x43
-;     mov  [es:0x010e], ax
-
-;     mov ax, 0xb800
-;     mov es, ax
-;     xor di, di
-;     mov cx, 8
-;     rep stosw
+    mov dx, 0x3D8
+    mov al, 0b01001 ; high res text mode, output enabled
+    out dx, al
 
     ret
 
@@ -208,11 +125,29 @@ int10_handler:
     jmp .done
 
 .set_palette_cga:
+    mov dx, 0x40
+    mov es, dx
+    mov al, byte [es:DATA_AREA_VIDEO_CGA_PALETTE]
+
+    cmp bh, 0
+    jne .set_palette
+
+    ; set background and intensity bits from bl
+    and bl, 0b00011111 ; 
+    and al, 0b11100000 ; clear lower bits. keep palette bit 
+    or al, bl ; set background color and intensity in al
+    mov byte [es:DATA_AREA_VIDEO_CGA_PALETTE], al
+    jmp .save_palette_and_done
+
+.set_palette:
+    and al, 0b00011111 ;
+    test bl, 01h
+	jz	.save_palette_and_done
+    or al, 0b00100000 ; set the palette bit (bit 5) if bit 0 of bl is set (palette 1)
+
+.save_palette_and_done:
+    mov byte [es:DATA_AREA_VIDEO_CGA_PALETTE], al
     mov dx, 0x3D9
-    mov al, 0x1
-    and al, bl
-    mov cl, 5
-    shl al, cl
     out dx, al
     jmp .done
 
