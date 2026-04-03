@@ -443,6 +443,17 @@ inline uint8_t readVGAByte(uint16_t offset) {
   }  
 }    
 
+void setVideoMode(uint8_t mode) {
+  current_video_mode = mode;
+  if (mode == 0x2) {
+    memset(text_buffer, 0, 4000);
+    memset(vga_data_array, 0, FRAME_BUFFER_SIZE);
+    text_buffer_dirty = false;
+  } else {
+    memset(vga_data_array, 0, FRAME_BUFFER_SIZE);
+  }
+}
+
 uint8_t processIO(uint16_t address, uint8_t value, bool is_write) {
   if (!is_write) {
     // For now, we only support reading from the status register to check vsync
@@ -465,12 +476,12 @@ uint8_t processIO(uint16_t address, uint8_t value, bool is_write) {
       // CGA Mode control register
       if (value & 0x2) { // graphics mode
         if (value & 0x10) {
-          current_video_mode = 0x6; // 640x200 mono
+          setVideoMode(0x6);
         } else {
-          current_video_mode = 0x4; // 320x200 color
+          setVideoMode(0x4);
         }
       } else { // text mode
-        current_video_mode = 0x2; // 80x25 text
+        setVideoMode(0x2);
       }
       break;
     case 0x3D9: {
@@ -500,11 +511,11 @@ uint8_t processIO(uint16_t address, uint8_t value, bool is_write) {
     case 0x3C2: // Miscellaneous Output Register
       // this is really crappy, but kinda works
       if (value == 0xa3) {
-        current_video_mode = 0x10;
+        setVideoMode(0x10);
       } else if (value == 0xe3) {
-        current_video_mode = 0x12;
+        setVideoMode(0x12);
       } else {
-        current_video_mode = 0x13;
+        setVideoMode(0x13);
       }
       break;
 
