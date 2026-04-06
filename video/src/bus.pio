@@ -23,6 +23,8 @@
 .define CS 15
 .define MUX 16
 .define IOCHRDY 28
+.side_set 1 opt
+
 
     set x, 1           
 
@@ -32,7 +34,7 @@ restart:
 
     wait 1 gpio CS        ; Wait for CS high
     ; 1. Wait for !CS
-    wait 0 gpio CS        ; Wait for CS (pin 28 relative to IN base) to be Low
+    wait 0 gpio CS        ; Wait for CS to be Low
 
     in x, 1              ; Flag that we have data
 
@@ -46,18 +48,29 @@ restart:
 
     jmp pin write
 
-    mov osr, x           ; Flag CHORDY
-    out pindirs, 1
-    mov osr, NULL
-    out pins, 1
-
     in NULL, 8           ; Push the read request.
 
-    ; IOCHRDY will be released by read part, we just wait here until everything is done.
-    wait 0 gpio WRRD
+    ; TODO: fix timings
+    ; mov osr, x           ; Flag CHORDY
+    ; out pindirs, 1
+    ; mov osr, NULL
+    ; out pins, 1
+
+    mov osr, ~NULL side 1
+
+    wait 0 gpio WRRD 
+
+    out pindirs, 8
+    set y, 8
+    mov osr, y
+    out pins, 5 ; we are assuming that every read is a vsync, and always returning 0x8.
+
     wait 1 gpio WRRD
 
-    jmp restart
+    mov osr, NULL
+    out pindirs, 8 side 0
+
+    jmp restart 
 
 write:
     ; 3. Wait for /WR to be down
@@ -77,11 +90,14 @@ static inline void bus_program_init(PIO pio, uint sm, uint offset, uint base_pin
     // Map the state machine's IN pin group to D0..D16
     sm_config_set_in_pins(&c, base_pin);
 
-    sm_config_set_out_pins(&c, 28, 1);
+    // sm_config_set_out_pins(&c, 28, 1);
+    sm_config_set_out_pins(&c, base_pin, 8);
 
     sm_config_set_jmp_pin(&c, 14);
 
     sm_config_set_set_pins(&c, 16, 1);
+
+    sm_config_set_sideset_pins(&c, 28);
 
     // Set this pin's GPIO function (connect PIO to the pad)
     // Initialize all 17 pins (D0-D16)
@@ -95,7 +111,7 @@ static inline void bus_program_init(PIO pio, uint sm, uint offset, uint base_pin
     pio_sm_set_consecutive_pindirs(pio, sm, base_pin, 16, false);
 
     pio_sm_set_consecutive_pindirs(pio, sm, 16, 1, true); // MUX pin as output
-    pio_sm_set_consecutive_pindirs(pio, sm, 28, 1, false); // IOCHRDY pin as higih impedance 
+    pio_sm_set_consecutive_pindirs(pio, sm, 28, 1, true);
 
     // Shift in configuration left and auto push with 27 bits
     sm_config_set_in_shift(&c, false, true, 27);

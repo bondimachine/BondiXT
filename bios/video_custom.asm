@@ -41,6 +41,12 @@ int10_handler:
     cmp ah, 0x6
     je .scroll_dn
 
+    cmp ah, 0x09
+    je .write_character_attribute
+
+    cmp ah, 0x0a
+    je .write_character
+
     cmp ah, 0xb
     je .set_palette_cga
 
@@ -246,6 +252,32 @@ int10_handler:
     out dx, al
     jmp .done
 
+.write_character_attribute:
+
+    call calculate_video_offset_es_si
+    mov ah, bl
+.write_next_character_attribute:    
+    mov word [es:si], ax      ; character and attribute
+    call serial_putc
+    inc si
+    inc si
+    dec cx
+    jnz .write_next_character_attribute ; write character and attribute cx times
+    jmp .done
+
+.write_character:
+
+    call calculate_video_offset_es_si
+
+.write_next_character:
+    mov byte [es:si], al      ; character
+    call serial_putc
+    inc si
+    inc si
+    dec cx
+    jnz .write_next_character ; write character cx times, attribute is unchanged
+    jmp .done
+
 .teletype_output:
     ; for debugging
     call serial_putc
@@ -264,27 +296,7 @@ int10_handler:
 
     mov bx, ax ; save character in bx for later use in text mode update
 
-    ; Write character to video memory
-    mov ax, 0x40
-    mov es, ax
-    mov dl, [es:DATA_AREA_CURSOR_X]
-    mov dh, [es:DATA_AREA_CURSOR_Y]
-
-    ; Calculate offset: (row * 80 + col) * 2
-    mov ah, 0
-    mov al, dh
-    mov cl, 160
-    mul cl
-
-    mov ch, 0
-    mov cl, dl
-    shl cx, 1
-    add ax, cx
-    mov si, ax
-
-    ; Write to video memory at B8000
-    mov ax, 0xb800
-    mov es, ax
+    call calculate_video_offset_es_si
     mov byte [es:si], bl      ; character
     mov byte [es:si+1], 0x07  ; attribute (white on black)
 
@@ -348,6 +360,37 @@ int10_handler:
     pop bx
 
     iret
+
+calculate_video_offset_es_si:
+    push ax
+    push cx
+
+    ; Write character to video memory
+    mov ax, 0x40
+    mov es, ax
+    mov dl, [es:DATA_AREA_CURSOR_X]
+    mov dh, [es:DATA_AREA_CURSOR_Y]
+
+    ; Calculate offset: (row * 80 + col) * 2
+    mov ah, 0
+    mov al, dh
+    mov cl, 160
+    mul cl
+
+    mov ch, 0
+    mov cl, dl
+    shl cx, 1
+    add ax, cx
+    mov si, ax
+
+    ; Write to video memory at B8000
+    mov ax, 0xb800
+    mov es, ax
+
+    pop cx ; restore count to cx
+    pop ax ; restore character to al
+
+    ret
 
 ; atc80x25:
 ;     db 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x14, 0x07, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 0x0c, 0x00, 0x0f, 0x08

@@ -81,13 +81,6 @@ wait_vsync:
     ; Bit 3 (0x08) indicates vertical retrace in progress
     mov dx, 0x3DA
     
-    ; First, wait until we're NOT in vertical retrace (wait for active display)
-.wait_not_in_vsync:
-    in al, dx
-    and al, 0x08
-    jnz .wait_not_in_vsync
-    
-    ; Now wait until we ARE in vertical retrace
 .wait_in_vsync:
     in al, dx
     and al, 0x08

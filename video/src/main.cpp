@@ -6,7 +6,6 @@
 // Include generated headers from the .pio files
 // PlatformIO/pioasm will generate these automatically during build
 #include "bus.pio.h"
-#include "bus_read.pio.h"
 #include "vga.pio.h"
 
 /*
@@ -52,7 +51,6 @@ const uint8_t PIN_VGA_RGB_BASE = 17; // R, R+, G, G+, B, B+ (6 pins)
 // Global PIO variables for Bus Interface
 PIO pio_bus = pio0;
 int sm_bus = -1;
-int sm_bus_read = -1;
 
 // Using PIO1 for VGA signals to keep them separate and avoid contention
 PIO pio_vga = pio1;
@@ -110,15 +108,8 @@ void setup() {
     Serial.println("Error: Could not claim State Machine for Bus Interface");
   }
 
-  unsigned int offset_bus_read = pio_add_program(pio_bus, &bus_read_program);
-  sm_bus_read = pio_claim_unused_sm(pio_bus, true);
-
-  while (sm_bus_read < 0) {
-    Serial.println("Error: Could not claim State Machine for Bus Read Interface");
-  }
 
   bus_program_init(pio_bus, sm_bus, offset_bus, PIN_BUS_BASE);
-  bus_read_program_init(pio_bus, sm_bus_read, offset_bus_read, PIN_BUS_BASE);
 
   #ifdef USE_BUS_DMA
   // Setup dma for read
@@ -293,7 +284,7 @@ void loop1() {
     }
 
     if (!is_write) {
-      pio_sm_put_blocking(pio_bus, sm_bus_read, result);
+      Serial.printf("Bus Message: Data: 0x%08X, Addr: 0x%05X, Value: 0x%02X io: %d write: %d\n", result, full_address, value, is_io, is_write);
     }
 
   }

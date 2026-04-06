@@ -1,6 +1,6 @@
-%define PS2_MOUSE
-%define PS2_MOUSE_IRQ_2
-%define PS2_KEYBOARD
+; %define PS2_MOUSE
+; %define PS2_MOUSE_IRQ_2
+; %define PS2_KEYBOARD
 %include "config.serial.inc"
 BITS 16
 CPU 8086
@@ -107,18 +107,28 @@ _start:
 
     call serial_init
     
-    mov si, welcome_message
-    call serial_print_string
-
     ; intialize video
     call init_video
 
-    mov ax, 0
-    mov es, ax
+    mov si, welcome_message
+    call print_string
 
     mov dx, POST_ADDRESS
     mov al, 0b11000011
     out dx, al
+
+    call init_keyboard
+
+%ifdef PS2_MOUSE
+    call init_mouse
+%endif
+
+    mov dx, POST_ADDRESS
+    mov al, 0b11000100
+    out dx, al
+
+    mov ax, 0
+    mov es, ax
 
     ; copy the boot sector to 0x7C00
     mov ah, 02h
@@ -132,21 +142,11 @@ _start:
     pop ds
 
     mov dx, POST_ADDRESS
-    mov al, 0b11000100
-    out dx, al
-
-    call init_keyboard
-
-%ifdef PS2_MOUSE
-    call init_mouse
-%endif
-
-    mov dx, POST_ADDRESS
     mov al, 0b11000101
     out dx, al
 
     mov si, boot_message
-    call serial_print_string
+    call print_string
 
     xor ax, ax
     mov ds, ax            ; DS = 0
@@ -157,6 +157,16 @@ _start:
 
     ; jump to 0x7C00 (boot sector)
     jmp 0x0000:0x7C00
+
+print_string:
+    lodsb
+    cmp al, 0
+    je  .done
+    mov ah, 0x0e
+    int 10h
+    jmp print_string
+.done:
+    ret
 
 
 %include "serial.asm"
