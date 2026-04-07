@@ -262,6 +262,7 @@ void draw_text_screen() {
   if (!text_buffer_dirty) {
     return;
   }
+  uint8_t vga_x_step = (640 / (text_columns / 2));
   text_buffer_dirty = false;
   bool text_mode = current_video_mode == 0x2;
   uint16_t vga_x = text_mode ? TEXT_MODE_X_OFFSET : 0;
@@ -275,7 +276,7 @@ void draw_text_screen() {
         text_buffer[offset] = 0; // Clear the text buffer in graphics mode after rendering, so we don't redraw text on top of new graphics
       }
     }  
-    vga_x += 8;
+    vga_x += vga_x_step;
     if (vga_x >= 640) {
       vga_x = text_mode ? TEXT_MODE_X_OFFSET : 0;;
       vga_y += 16;
