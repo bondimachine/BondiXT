@@ -1,14 +1,14 @@
 GAL20V8
 BondiXT
 
-CLK   A4    A5    A6    A7    A8    A9    A17   A18   A19     NC   GND
-/OE   NC    /COM1  /KB  /POST  /LPT1  /RAML  /RAMH  /ROM   /FBUFFER IO   VCC
+CLK   A4    A5      A6           A7    A8    A9    A17   A18   A19     NC   GND
+/OE   NC    /COM1  /PICPITKB  /POST  /LPT1  /RAML  /RAMH  /ROM   /FBUFFER IO   VCC
 
 ; /* combinatorial logic */
 
  COM1 =  IO * A9 *  A8 *  A7 * A6 *  A5 * A4;  	/* 0x3F0-0x3FF ? A9..A4 = 1 1 1 1 1 1 */
- KB   =  IO * /A9 * /A8 *  /A7 * A6 *  A5 * /A4;/* 0x060-0x067 ? A9..A4 = 0 0 0 1 1 0 */
- POST =  IO * /A9 * /A8 * A7 * /A6 * /A5 * /A4; /* 0x080-0x087 ? A9..A4 = 0 0 1 0 0 0 */
+ PICPITKB =  IO * /A9 * /A8 *  /A7 *     /A4;/* 0x020-0x06F ? A9..A4 = 0 0 0 X X 0 */
+ POST =  IO * /A9 * /A8 * A7 * /A6 * /A5 * /A4; /* 0x080-0x08F ? A9..A4 = 0 0 1 0 0 0 */
  LPT1 =  IO * A9 *  A8 * /A7 * A6 *  A5 * A4;  	/* 0x370-0x37F ? A9..A4 = 1 1 0 1 1 1 */
  
  RAML    = /IO * /A19 ;                           /* 0x00000-0x7FFFF ? A19 = 0 */

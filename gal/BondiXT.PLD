@@ -26,7 +26,7 @@ PIN  23  = IO ; /* I/O=1 ? puertos, I/O=0 ? memoria */
 
 /* *************** OUTPUT PINS *********************/
  PIN 15 = !COM1 ;   	/* 0x3F0-0x3FF (cuando IO=1)*/
- PIN 16 = !KB ;   	    /* 0x060-0x067 (cuando IO=1)*/
+ PIN 16 = !PICPITKB ; /* 0x020-0x06F (cuando IO=1)*/
  PIN 17 = !POST ;   	/* 0x080-0x087 (cuando IO=1)*/
  PIN 18 = !LPT1 ;   	/* 0x370-0x37F (cuando IO=1)*/
 
@@ -41,7 +41,7 @@ PIN  23  = IO ; /* I/O=1 ? puertos, I/O=0 ? memoria */
 /* combinatorial logic */
 
  COM1 =  IO & A9 &  A8 &  A7 & A6 &  A5 & A4;  	/* 0x3F0-0x3FF ? A9..A4 = 1 1 1 1 1 1 */
- KB   =  IO & !A9 & !A8 &  &A7 & A6 &  A5 & !A4;/* 0x060-0x067 ? A9..A4 = 0 0 0 1 1 0 */
+ PICPITKB =  IO & !A9 & !A8 & A7      & !A4;/* 0x060-0x067 ? A9..A4 = 0 0 0 X X 0 */
  POST =  IO & !A9 & !A8 & A7 & !A6 & !A5 & !A4; /* 0x080-0x087 ? A9..A4 = 0 0 1 0 0 0 */
  LPT1 =  IO & A9 &  A8 & !A7 & A6 &  A5 & A4;  	/* 0x370-0x37F ? A9..A4 = 1 1 0 1 1 1 */
  
