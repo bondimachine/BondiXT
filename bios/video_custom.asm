@@ -234,7 +234,7 @@ int10_handler:
     mov al, ch
     out dx, al
 
-    mov dx, 0x3d4
+    dec dx
     mov al, 0x0f
     out dx, al
 
@@ -370,7 +370,6 @@ int10_handler:
 
 calculate_video_offset_es_si:
     push ax
-    push bx
     push cx
 
     ; Write character to video memory
@@ -393,7 +392,8 @@ calculate_video_offset_es_si:
     mov si, ax
 
 
-    cmp bh, 0x03 
+    mov byte cl, [es:DATA_AREA_VIDEO_MODE]
+    cmp cl, 0x03 
     ja .not_text_mode
 
     ; Write to video memory at B8000 if we are in text mode, otherwise B0000. This is a hack to avoid making the BIOS render the char.
@@ -407,7 +407,6 @@ calculate_video_offset_es_si:
     mov es, ax
 
     pop cx
-    pop bx
     pop ax
 
     ret
