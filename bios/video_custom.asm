@@ -1,4 +1,5 @@
 DATA_AREA_VIDEO_MODE EQU 0x49
+DATA_AREA_SCREEN_COLUMNS EQU 0x4a
 DATA_AREA_CURSOR_X EQU 0x50
 DATA_AREA_CURSOR_Y EQU 0x51
 DATA_AREA_VIDEO_CGA_PALETTE equ	66h
@@ -8,6 +9,7 @@ init_video:
     mov ax, 0x40
     mov es, ax
     mov byte [es:DATA_AREA_VIDEO_MODE], 0x03
+    mov byte [es:DATA_AREA_SCREEN_COLUMNS], 80
 
     mov byte [es:DATA_AREA_CURSOR_X], 0
     mov byte [es:DATA_AREA_CURSOR_Y], 0
@@ -66,6 +68,7 @@ int10_handler:
 
 .set_video_mode:
 
+    mov bl, 80 ; default to 80 columns
     mov ah, al ; save requested mode in ah for later use in special functions
     cmp al, 0x02 ; 80x25 monochrome text mode
     je .set_mode_text
@@ -101,6 +104,7 @@ int10_handler:
 .set_mode_cga:
     mov dx, 0x3D8
     mov al, 0b01010 ; low res graphics mode, output enabled
+    mov bl, 40 ; 40 columns in low res graphics mode
     jmp .set_save_and_done
 
 .set_mode_cga_high_res:
@@ -121,6 +125,7 @@ int10_handler:
 .set_mode_mcga:
     mov dx, 0x3c2
     mov al, 0xf ; else to enforce mcga mode
+    mov bl, 40 ; 40 columns in 320x200
     jmp .set_save_and_done
 
 .set_save_and_done:
@@ -128,6 +133,7 @@ int10_handler:
     mov dx, 0x40
     mov es, dx
     mov byte [es:DATA_AREA_VIDEO_MODE], ah
+    mov byte [es:DATA_AREA_SCREEN_COLUMNS], bl
     jmp .done
 
 .set_palette_cga:
@@ -210,7 +216,8 @@ int10_handler:
 .update_cursor_and_done:
 
     mov al, dh
-    mov cl, 160
+    mov byte cl, [es:DATA_AREA_SCREEN_COLUMNS]
+    shl cl, 1 ; multiply by 2 for character and attribute
     mul cl
 
     mov ch, 0
@@ -227,7 +234,7 @@ int10_handler:
     mov al, ch
     out dx, al
 
-    dec dx
+    mov dx, 0x3d4
     mov al, 0x0f
     out dx, al
 
@@ -363,6 +370,7 @@ int10_handler:
 
 calculate_video_offset_es_si:
     push ax
+    push bx
     push cx
 
     ; Write character to video memory
@@ -374,7 +382,8 @@ calculate_video_offset_es_si:
     ; Calculate offset: (row * 80 + col) * 2
     mov ah, 0
     mov al, dh
-    mov cl, 160
+    mov byte cl, [es:DATA_AREA_SCREEN_COLUMNS]
+    shl cl, 1 ; multiply by 2 for character and attribute
     mul cl
 
     mov ch, 0
@@ -383,12 +392,23 @@ calculate_video_offset_es_si:
     add ax, cx
     mov si, ax
 
-    ; Write to video memory at B8000
+
+    cmp bh, 0x03 
+    ja .not_text_mode
+
+    ; Write to video memory at B8000 if we are in text mode, otherwise B0000. This is a hack to avoid making the BIOS render the char.
     mov ax, 0xb800
+    jmp .finish
+
+.not_text_mode:
+    mov ax, 0xb000
+
+.finish:
     mov es, ax
 
-    pop cx ; restore count to cx
-    pop ax ; restore character to al
+    pop cx
+    pop bx
+    pop ax
 
     ret
 

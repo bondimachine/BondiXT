@@ -15,7 +15,7 @@ bool text_buffer_dirty = false;
 static const uint16_t TEXT_MODE_X_OFFSET = 1;
 
 uint8_t current_video_mode = 0x2; // Start in text mode by default
-
+uint8_t text_columns = 160; // 80 characters * 2 bytes/character
 
 uint8_t current_sequencer_index = 0;
 uint8_t current_graphics_controller_index = 0;
@@ -123,8 +123,6 @@ inline void updateTextModeBuffer(uint16_t offset, uint8_t val) {
     // Each byte represents either the character code or the attribute for a single character cell
     // We will ignore attributes for now and just render the character glyphs in white
 
-    uint16_t vga_y = (offset / 160) * 16; // Each line has 80 chars * 2 bytes/char = 160 bytes
-    uint16_t vga_x = ((offset % 160) / 2) * 8; // Which character in the line (0-79)
     bool is_char_byte = (offset % 2 == 0); // Even byte = char code, Odd byte = attribute
     uint8_t char_code = is_char_byte ? val : text_buffer[offset - 1]; // Get char code from even byte
     uint8_t attr = is_char_byte ? text_buffer[offset + 1] : val;
@@ -261,17 +259,25 @@ void updateVGAByte(uint16_t offset, uint8_t val) {
 }
 
 void draw_text_screen() {
-  if (current_video_mode != 0x2 || !text_buffer_dirty) {
+  if (!text_buffer_dirty) {
     return;
   }
   text_buffer_dirty = false;
-  uint16_t vga_x = TEXT_MODE_X_OFFSET;
+  bool text_mode = current_video_mode == 0x2;
+  uint16_t vga_x = text_mode ? TEXT_MODE_X_OFFSET : 0;
   uint16_t vga_y = 0;
   for (uint16_t offset = 0; offset < 4000 ; offset += 2) {
-    render_char(vga_x, vga_y, text_buffer[offset], text_buffer[offset + 1]);
+    char chr = text_buffer[offset];
+    if (text_mode || chr) {
+      // In graphics mode, we use 0 as flag for let the graphics there
+      render_char(vga_x, vga_y, chr, text_buffer[offset + 1]);
+      if (!text_mode) {
+        text_buffer[offset] = 0; // Clear the text buffer in graphics mode after rendering, so we don't redraw text on top of new graphics
+      }
+    }  
     vga_x += 8;
     if (vga_x >= 640) {
-      vga_x = TEXT_MODE_X_OFFSET;
+      vga_x = text_mode ? TEXT_MODE_X_OFFSET : 0;;
       vga_y += 16;
     }
   }
@@ -281,16 +287,16 @@ void scroll_text(int8_t lines) {
   if (lines != 0) {
     // first move the contents up, unless we have to just clear things up
     if (lines < 0) {
-      uint16_t offset_lines = -lines * 160;
+      uint16_t offset_lines = -lines * text_columns;
       memmove(text_buffer, text_buffer + offset_lines, 4000 - offset_lines);
     } else {
-      uint16_t offset_lines = lines * 160;
+      uint16_t offset_lines = lines * text_columns;
       memmove(text_buffer + offset_lines, text_buffer, 4000 - offset_lines);      
     }
   }
 
   uint8_t clear_start = lines < 0 ?  25 + lines : lines;
-  for (uint16_t offset = clear_start * 160; offset < 4000; offset+=2) {
+  for (uint16_t offset = clear_start * text_columns; offset < 4000; offset+=2) {
     text_buffer[offset] = ' ';
     text_buffer[offset + 1] = 0x7;
   }
@@ -303,8 +309,8 @@ bool cursor_state = false;
 void render_cursor(bool show) {
   if (current_video_mode == 0x2) {
 
-    uint16_t vga_y = (cursor_offset / 160) * 16; // Each line has 80 chars * 2 bytes/char = 160 bytes
-    uint16_t vga_x = (((cursor_offset % 160) / 2) * 8) + TEXT_MODE_X_OFFSET; // Which character in the line (0-79)
+    uint16_t vga_y = (cursor_offset / text_columns) * 16; // Each line has 80 chars * 2 bytes/char = 160 bytes
+    uint16_t vga_x = (((cursor_offset % text_columns) / 2) * 8) + TEXT_MODE_X_OFFSET; // Which character in the line (0-79)
 
     for (int row = 14; row < 16; row++) {
       for (int col = 0; col < 8; col++) {
@@ -322,9 +328,14 @@ inline void crtc_register_set(uint8_t value) {
       next_cursor_offset_hi = value;
       break;
     case 0x0f:
-      render_cursor(false);
+      bool current_cursor_state = cursor_state;
+      if (current_cursor_state) {
+        render_cursor(false);
+      }
       cursor_offset = value | (next_cursor_offset_hi << 8);
-      render_cursor(true);
+      if (current_cursor_state) {
+        render_cursor(true);
+      }
       break;
   }
 }
@@ -445,12 +456,13 @@ inline uint8_t readVGAByte(uint16_t offset) {
 
 void setVideoMode(uint8_t mode) {
   current_video_mode = mode;
-  if (mode == 0x2) {
-    memset(text_buffer, 0, 4000);
-    memset(vga_data_array, 0, FRAME_BUFFER_SIZE);
-    text_buffer_dirty = false;
+  memset(text_buffer, 0, 4000);
+  memset(vga_data_array, 0, FRAME_BUFFER_SIZE);
+  text_buffer_dirty = false;
+  if (mode == 0x4 || mode == 0x5 || mode == 0x13) {
+    text_columns = 80;
   } else {
-    memset(vga_data_array, 0, FRAME_BUFFER_SIZE);
+    text_columns = 160;
   }
 }
 

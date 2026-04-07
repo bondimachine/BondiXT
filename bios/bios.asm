@@ -98,6 +98,17 @@ _start:
     add si, 2
     mov word [es:si], cs
 
+
+    mov si, 0x6c
+    mov word [es:si], int1Bh_handler
+    add si, 2
+    mov word [es:si], cs
+
+    mov si, 0x70
+    mov word [es:si], int1Ch_handler
+    add si, 2
+    mov word [es:si], cs
+
     sti                   ; enable interrupts again
 
 
@@ -117,6 +128,13 @@ _start:
     mov al, 0b11000011
     out dx, al
 
+    call init_timer
+
+    mov dx, POST_ADDRESS
+    mov al, 0b11000100
+    out dx, al
+
+
     call init_keyboard
 
 %ifdef PS2_MOUSE
@@ -124,7 +142,7 @@ _start:
 %endif
 
     mov dx, POST_ADDRESS
-    mov al, 0b11000100
+    mov al, 0b11000101
     out dx, al
 
     mov ax, 0
@@ -142,11 +160,13 @@ _start:
     pop ds
 
     mov dx, POST_ADDRESS
-    mov al, 0b11000101
+    mov al, 0b11000110
     out dx, al
 
     mov si, boot_message
     call print_string
+
+    call beep
 
     xor ax, ax
     mov ds, ax            ; DS = 0
@@ -175,16 +195,12 @@ print_string:
 %include "video_custom.asm"
 %include "keyboard_serial.asm"
 %include "disk_embedded.asm"
+%include "timer.asm"
 
 %ifdef PS2_MOUSE
 %include "mouse.asm"
 %endif
 
-
-irq0_handler:
-    mov	al, 0x20 ; signal PIC
-	out	0x20, al
-    iret
 
 int11_handler:
     ; 1 floppy 
@@ -217,7 +233,10 @@ int17_handler:
     mov ah, 0
     iret
 
-int1Ah_handler:
+int1Bh_handler: ; ctrl+c handler for user to hook
+    iret    
+
+int1Ch_handler: ; system timer tick for user to hook
     iret
 
 welcome_message    db "Welcome to BondiXT!", 13, 10, 13, 10, 0
