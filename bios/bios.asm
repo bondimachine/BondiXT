@@ -1,6 +1,6 @@
 ; %define PS2_MOUSE
 ; %define PS2_MOUSE_IRQ_2
-; %define PS2_KEYBOARD
+%define PS2_KEYBOARD
 %include "config.serial.inc"
 BITS 16
 CPU 8086
@@ -28,18 +28,36 @@ _start:
     xor ax, ax
     mov es, ax            ; ES = 0
 
+    mov cx, 0
+    mov si, 0
+
+reset_ivt:
+    mov word [es:si], int_dummy_handler
+    add si, 2
+    mov word [es:si], cs
+    add si, 2
+    inc cl
+    jnz reset_ivt
+
+
+    mov si, 0x20
+    mov cl, 0
+
+reset_irq:
+    mov word [es:si], irq_dummy_handler
+    add si, 2
+    mov word [es:si], cs
+    add si, 2
+    inc cl
+    cmp cl, 8
+    jne reset_irq
+
+
     mov si, 0x20
     mov word [es:si], irq0_handler
     add si, 2
     mov word [es:si], cs
 
-
-%ifdef PS2_KEYBOARD
-    mov si, 0x24
-    mov word [es:si], irq01_handler
-    add si, 2
-    mov word [es:si], cs
-%endif
 
 %ifdef PS2_MOUSE
 %ifdef PS2_MOUSE_IRQ_2
@@ -99,16 +117,6 @@ _start:
     mov word [es:si], cs
 
 
-    mov si, 0x6c
-    mov word [es:si], int1Bh_handler
-    add si, 2
-    mov word [es:si], cs
-
-    mov si, 0x70
-    mov word [es:si], int1Ch_handler
-    add si, 2
-    mov word [es:si], cs
-
     sti                   ; enable interrupts again
 
 
@@ -136,6 +144,20 @@ _start:
 
 
     call init_keyboard
+%ifdef PS2_KEYBOARD    
+    test al, 1
+    jz .no_keyboard
+
+    mov si, keyboard_detected_message
+    call print_string
+    jmp .init_keyboard_done
+
+.no_keyboard:
+    mov si, keyboard_not_detected_message
+    call print_string
+
+.init_keyboard_done:
+%endif 
 
 %ifdef PS2_MOUSE
     call init_mouse
@@ -233,14 +255,25 @@ int17_handler:
     mov ah, 0
     iret
 
-int1Bh_handler: ; ctrl+c handler for user to hook
+int_dummy_handler:
     iret    
 
-int1Ch_handler: ; system timer tick for user to hook
-    iret
+irq_dummy_handler:
+    push ax
+    mov	al, 0x20 ; signal PIC
+	out	0x20, al
+    pop ax
+    iret    
 
 welcome_message    db "Welcome to BondiXT!", 13, 10, 13, 10, 0
 boot_message    db "Booting from embedded disk image...", 13, 10, 13, 10, 0
+
+%ifdef PS2_KEYBOARD    
+
+keyboard_detected_message    db "Keyboard detected", 13, 10, 13, 10, 0
+keyboard_not_detected_message    db "Keyboard not detected - Using serial input", 13, 10, 13, 10, 0
+
+%endif
 
 reset_vector:
     times 0xFFF0 - ($ - $$) db 0

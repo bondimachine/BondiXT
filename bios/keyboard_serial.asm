@@ -12,12 +12,9 @@ init_keyboard:
 
         mov al, 0xAA
         out 0x64, al
-
-        in al, 0x64
-        test al, 0x04              ; POST OK?
-        jz .no_keyboard
-
-        in al, 0x60 ; Discard 0x55
+        in al, 0x60
+        cmp al, 0x55
+        jne .no_keyboard
 
         ; Enable Set 2 -> Set 1 scancode translation in the 8042 controller
         mov al, 0x20               ; Command: read controller config byte
@@ -30,14 +27,12 @@ init_keyboard:
         pop ax
         out 0x60, al               ; Write modified config byte
 
-        in al, 0x21
-        and al, 0xFD          ; Clear bit 2 -> unmask IRQ1 (keyboard)
-        out 0x21, al
-
         mov byte [es:BIOS_DATA_AREA_USE_KEYBOARD], 1
         mov word [es:BIOS_DATA_AREA_BUFFER_HEAD], BIOS_DATA_AREA_BUFFER
         mov word [es:BIOS_DATA_AREA_BUFFER_TAIL], BIOS_DATA_AREA_BUFFER
         mov byte [es:BIOS_DATA_AREA_SHIFT_KEYS], 0
+
+        mov al, 1
         jmp .keyboard_init_done
 
 
@@ -45,6 +40,7 @@ init_keyboard:
 
 .no_keyboard:
     mov byte [es:BIOS_DATA_AREA_USE_KEYBOARD], 0
+    mov al, 0
 
 .keyboard_init_done:
     ret
@@ -308,11 +304,6 @@ int16_handler:
     pop bx
 .fetch_done:
     ret
-
-irq01_handler:
-    mov	al, 0x20 ; signal PIC
-	out	0x20, al
-    iret
 
 ; -----------------------------------------------------------------------
 ; Scancode to ASCII lookup table (Set 1, US QWERTY, unshifted)

@@ -1,10 +1,12 @@
 .program bus
 
-; Pins 0-7: AD0-AD7 (Base+0 to Base+7)
-; Pin 8: /RD (Base+8)
-; Pin 9: /WR (Base+9)
-; Pin 10: /CS (Base+10) (!A8 && !A9 && IO, right after ALE)
+; Pins 0-7: D0-D7 (Base+0 to Base+7)
+; Pin 8: /CS (Base+8) (!A8 && !A9 && IO && !ALE)
+; Pin 9: \WR & \RD (Base+9)
+; Pin 10: DT/R (Base+10)
 ; Pin 11: READY
+; Pin 14: CLK
+; Pin 15: A2
 
 ; Packet Format sent to CPU (RX FIFO):
 ; Both Read and Write cycles now align Address and Flag positions.
@@ -14,18 +16,22 @@
 ; Bits 9-16: Address
 
 .wrap_target
+restart:
+    ; Wait for /CS High (De-assertion)
+    wait 1 pin 8
     ; 1. Wait for /CS (Active Low)
-    wait 0 pin 10
+    wait 0 pin 8
 
-    ; 2. Read Address (AD0-AD7)
-    ; ISR: [ ... | Address ]
-    in pins, 8
-    
+    mov osr, pins
+    out NULL, 15
+
+    in osr, 1 ; read A2
+
     ; 3. Check /RD
-    jmp pin check_write
+    jmp pin write
 
     ; === READ CYCLE ===
-    ; /RD is LOW (Active).
+    ; DT/R is LOW (Read).
     
     ; ISR: [ (Address << 9)], autopush
     in null, 9;
@@ -33,27 +39,30 @@
     set pindirs, 1; set IOCHREADY as output
     set pins, 0; set IOCHREADY dn
 
+    wait 0 pin 9; // Wait for /RD to go low
+
     ; Wait for Data from TX FIFO (from CPU).
     pull block
 
     ; Drive Data on AD0-AD7
     mov pins, osr
-
     mov osr, y
     ; Enable Output Driver (Set AD0-AD7 to Output)
     out pindirs, 8
+
+    wait 1 pin 14; // Wait for CLK high
     set pindirs, 0; set IOCHREADY as high impedance
 
     ; Wait for /RD High (End of Read)
-    wait 1 pin 8
+    wait 1 pin 9
 
     ; Disable Output Driver (Set pins to Input)
     mov osr, null
     out pindirs, 8   
 
-    jmp end_cycle
+    jmp restart
 
-check_write:
+write:
     ; === WRITE CYCLE ===
     ; /RD was High. Wait for /WR Low.
     wait 0 pin 9
@@ -67,10 +76,6 @@ check_write:
     ; ISR: [ (Address << 9) | (Data << 1) | 0b1 ], autopush
     in y, 1
 
-end_cycle:
-    ; Wait for /CS High (De-assertion)
-    wait 1 pin 10
-
 .wrap
 
 % c-sdk {
@@ -81,13 +86,13 @@ static inline void bus_program_init(PIO pio, uint sm, uint offset, uint base_pin
     sm_config_set_in_pins(&c, base_pin);
     sm_config_set_out_pins(&c, base_pin, 8);
     sm_config_set_set_pins(&c, base_pin + 11, 1);
-    sm_config_set_jmp_pin(&c, base_pin + 8);
+    sm_config_set_jmp_pin(&c, base_pin + 10);
 
     // 2. Configure Shift Directions
     // IN Shift: Left, Autopush ON
     // ISR = (ISR << count) | Input.
-    // We shift in: Address(8) -> Data/Dummy(8) -> Flag(1).
-    sm_config_set_in_shift(&c, false, true, 17); 
+    // We shift in: Address(1) -> Data/Dummy(8) -> Flag(1).
+    sm_config_set_in_shift(&c, false, true, 10); 
 
     // OUT Shift: Right, Autopull OFF
     sm_config_set_out_shift(&c, true, false, 32);
@@ -96,9 +101,12 @@ static inline void bus_program_init(PIO pio, uint sm, uint offset, uint base_pin
     for (uint i = 0; i <= 11; i++) {
         pio_gpio_init(pio, base_pin + i);
     }
+    pio_gpio_init(pio, base_pin + 14);
+    pio_gpio_init(pio, base_pin + 15);
 
     // 4. Set Pin Directions (All Input initially)
     pio_sm_set_consecutive_pindirs(pio, sm, base_pin, 12, false);
+    pio_sm_set_consecutive_pindirs(pio, sm, base_pin + 14, 2, false);
 
     // 5. Pre-load Y register with 0xFFFFFFFF
     pio_sm_exec(pio, sm, pio_encode_mov_not(pio_y, pio_null));

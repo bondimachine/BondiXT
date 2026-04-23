@@ -16,19 +16,22 @@ init_timer:
 	out	0x40, al
 	out	0x40, al    
 
-    mov	al,13h			; ICW1 - edge triggered, single, ICW4
+    mov	al, 0x13			; ICW1 - edge triggered, single, ICW4 needed
 	out	0x20, al
 	mov	al, 0x08			; ICW2 - interrupt vector offset = 8
 	out	0x21, al
-	mov	al, 0x09			; ICW4 - buffered mode, 8086/8088
+	mov	al, 0x01			; ICW4 - 8086/8088
 	out	0x21, al
         
+    mov al, 0
+    out 0x21, al
+    
     ret
 
 int1Ah_handler:
 
-    push ax
     push es
+    push ax
     
     mov ax, 0x40
     mov es, ax
@@ -94,7 +97,7 @@ beep:
 	mov	al, 0xB6		; set PIC channel 2 to mode 3
 	out	0x43, al
 
-	mov	ax, 1491		; approximately 800 Hz
+	mov	ax, 0x800		; approximately 800 Hz compensating the 1.84 mhz clock instead of 1.19
 	out	0x42, al		; load divisor's low byte to PIC
 	mov	al, ah
 	out	0x42, al		; load divisor's high byte to PIC

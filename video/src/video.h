@@ -455,10 +455,12 @@ inline uint8_t readVGAByte(uint16_t offset) {
   }  
 }    
 
-void setVideoMode(uint8_t mode) {
+void setVideoMode(uint8_t mode, bool keep_buffer = false) {
   current_video_mode = mode;
-  memset(text_buffer, 0, 4000);
-  memset(vga_data_array, 0, FRAME_BUFFER_SIZE);
+  if (!keep_buffer) {
+    memset(text_buffer, 0, 4000);
+    memset(vga_data_array, 0, FRAME_BUFFER_SIZE);
+  }
   text_buffer_dirty = false;
   if (mode == 0x4 || mode == 0x5 || mode == 0x13) {
     text_columns = 80;
@@ -485,18 +487,20 @@ uint8_t processIO(uint16_t address, uint8_t value, bool is_write) {
       crtc_register_set(value);
       break;
 
-    case 0x3D8:
+    case 0x3D8: {
+      bool keep_buffer = !(value & 0x80); // we use a custom bit 7 to indicate whether to clear the buffer
       // CGA Mode control register
       if (value & 0x2) { // graphics mode
         if (value & 0x10) {
-          setVideoMode(0x6);
+          setVideoMode(0x6, keep_buffer);
         } else {
-          setVideoMode(0x4);
+          setVideoMode(0x4, keep_buffer);
         }
       } else { // text mode
-        setVideoMode(0x2);
+        setVideoMode(0x2, keep_buffer);
       }
       break;
+    }  
     case 0x3D9: {
       // CGA Color control register
       bool intensity = value & 0x10;

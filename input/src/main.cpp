@@ -1,27 +1,59 @@
 #include <Arduino.h>
-#include <Adafruit_TinyUSB.h>
 #include "hid_to_scancode.h"
+
+#ifndef SIMULATE
+
+#include <Adafruit_TinyUSB.h>
 
 #if not(CFG_TUD_HID)
   #error "No HID support"
 #endif
-#include "bus.pio.h"
 
 Adafruit_USBH_Host USBHost;
 
+#else
 
+#define Serial1 Serial
+
+#endif
+
+#include "bus.pio.h"
+
+/*
+; Pins 0-7: D0-D7 (Base+0 to Base+7)
+; Pin 8: /CS (Base+8) (!A9 & !A8 & !A7 & A6 & A5 & !A4 & !A0 & IO & !ALE) (60 - 6F excluding 61)
+; Pin 9: \WR & \RD (Base+9)
+; Pin 10: DT/R (Base+10)
+; Pin 11: READY
+; Pin 12: CLK
+; Pin 13: A2
+; Pin 26: Keyboard Interrupt
+; Pin 27: Mouse Interrupt
+
+*/
 bool callback = false;
 
 PIO pio_bus = pio0;
 int sm_bus = -1;
+uint8_t keyboard_addr = 0;
+uint8_t mouse_addr = 0;
 
-uint8_t pins61h = 0;
+volatile uint32_t command_write = 0;
+volatile uint32_t status_read = 0;
+volatile uint32_t data_read = 0;
+volatile uint32_t data_write = 0;
+volatile uint8_t write_commands[32] = {0};
+volatile uint8_t write_datas[32] = {0};
 
 void setup() {
+#ifndef SIMULATE  
     Serial1.setTX(12);
     Serial1.setRX(13);
+#endif
+
     Serial1.begin(115200);
 
+#ifndef SIMULATE  
     tuh_hid_mount_cb(0, 0, NULL, 0);
     while(!callback) {
       Serial1.println("Callbacks are not ours");
@@ -30,18 +62,12 @@ void setup() {
     if(!USBHost.begin(0)) {
       Serial1.println("Failed to initialize USB Host");
     }; // 0 means use native RP2040 host
-
-    pinMode(14, OUTPUT);
-    digitalWrite(14, LOW);
-
-    pinMode(15, OUTPUT);
-    digitalWrite(15, LOW);
-
+#endif
     pinMode(26, OUTPUT);
-    digitalWrite(14, LOW);
+    digitalWrite(26, LOW);
 
     pinMode(27, OUTPUT);
-    digitalWrite(15, LOW);
+    digitalWrite(27, LOW);
 
     Serial1.println("Started");
 
@@ -62,7 +88,7 @@ void setup1() {
 
 }
 
-volatile uint8_t command_byte = 0b010000111;
+volatile uint8_t command_byte = 0b01000111;
 
 volatile uint8_t next60h = 0;
 volatile uint8_t after_ack = 0;
@@ -83,7 +109,6 @@ volatile uint8_t data_tail = 0;
 volatile uint8_t data_count = 0;
 
 void data_buf_write(uint8_t data, bool is_mouse) {
-  if (data_count >= DATA_BUF_SIZE) return;
 
   if (is_mouse && !mouse_enabled) {
     return;
@@ -93,18 +118,23 @@ void data_buf_write(uint8_t data, bool is_mouse) {
     return;
   }
 
-  data_buffer[data_head] = {data, is_mouse};
-  data_head = (data_head + 1) % DATA_BUF_SIZE;
-  data_count++;
-  
+  if (data_count < DATA_BUF_SIZE) {
+    data_buffer[data_head] = {data, is_mouse};
+    data_head = (data_head + 1) % DATA_BUF_SIZE;
+    data_count++;
+  }
+
   if (is_mouse && (command_byte & 0b10)) {
-    gpio_put(15 , true);
-    __asm("nop; nop; nop; nop; nop; nop; nop; nop;");
-    gpio_put(15, false);
+    // Mouse Interupt
+    gpio_put(27 , true);
+    // at least 100 ns
+    __asm("nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop;");
+    gpio_put(27, false);
   } else if (!is_mouse && (command_byte & 0b1)) {
-    gpio_put(14, true);
-    __asm("nop; nop; nop; nop; nop; nop; nop; nop;");
-    gpio_put(14, false);
+    // Keyboard Interrupt
+    gpio_put(26, true);
+    __asm("nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop;");
+    gpio_put(26, false);
   }
 }
 
@@ -130,19 +160,19 @@ void process8042_64h_write(uint8_t command) {
       break;
     case 0xAD: // disable keyboard
       keyboard_enabled = false;
-      Serial1.println("keyboard disabled");
+      // Serial1.println("keyboard disabled");
       break;
     case 0xAE: // enable keyboard
       keyboard_enabled = true;
-      Serial1.println("keyboard enabled");
+      // Serial1.println("keyboard enabled");
       break;
     case 0xA7: // disable mouse
       mouse_enabled = false;
-      Serial1.println("mouse disabled");
+      // Serial1.println("mouse disabled");
       break;
     case 0xA8: // enable mouse
       mouse_enabled = true;
-      Serial1.println("mouse enabled");
+      // Serial1.println("mouse enabled");
       break;
   }
 }
@@ -161,8 +191,8 @@ uint8_t process8042_60h_read() {
       next60h = 0;
       return 0;
     case 0xAA: // test, return 55h in data
-      next60h = 0;
-      return 0xAA;
+      next60h = 0;      
+      return keyboard_addr > 0 ? 0x55 : 0;
     case 0xEE: // diagnostic, return EE
       next60h = 0;
       return 0xEE;
@@ -183,8 +213,8 @@ void process8042_60h_write(uint8_t value) {
   switch (next60h) {
     case 0x60:
       command_byte = value;
-      mouse_enabled = value & 0b00100000;
-      keyboard_enabled = value & 0b00010000;
+      mouse_enabled = !(value & 0b00100000);
+      keyboard_enabled = !(value & 0b00010000);
       next60h = 0xFA;
       return;
     case 0xCD: // write leds value (internal)
@@ -237,7 +267,9 @@ inline uint8_t status_register() {
   return 0x4 | ((has_data && data_buffer[data_tail].is_mouse) << 5) | (has_data || next60h > 0);
 }
 
+#ifndef SIMULATE
 void loop() {
+    static uint32_t last_print = 0;
     USBHost.task();
     if (Serial1.available()) {
         int inByte = Serial1.read();
@@ -245,46 +277,79 @@ void loop() {
           reset_usb_boot(0,0);
         }
     }
+    if (millis() - last_print > 1000) {
+      Serial1.printf("64r: %05d, 64w: %05d, 60r: %05d, 60w: %05d, K: %d, M: %d\n", status_read, command_write, data_read, data_write, keyboard_enabled, mouse_enabled);
+      for (uint32_t i = 0; i < (command_write & 31); i++) {
+        Serial1.printf("64w: 0x%02X\n", write_commands[i]);
+      }
+      for (uint32_t i = 0; i < (data_write & 31); i++) {
+        Serial1.printf("60w: 0x%02X\n", write_datas[i]);
+      }
+      command_write = 0;
+      status_read = 0;
+      data_read = 0;
+      data_write = 0;
+      last_print = millis();
+    }
+    
 }
+#else
+
+void loop() {
+    if (Serial1.available()) {
+        int inByte = Serial1.read();
+        uint8_t base = ascii2scancode(inByte);
+        data_buf_write(base, false);
+        data_buf_write(base | 0x80, false);
+        Serial1.printf("Simulated key press: %c (0x%02X)\n", inByte, base);
+    }
+}
+
+#endif
 
 void loop1() {
     uint32_t data = pio_sm_get_blocking(pio_bus, sm_bus);
 
     // Format from bus.pio:
-    // ISR = [Address (8) << 9  | Data (8) << 1 | Flag (1)]
+    // ISR = [a2 (1) << 9  | Data (8) << 1 | Flag (1)]
 
     uint8_t value = (data >> 1) & 0xFF;
-    uint8_t address = ((data >> 9) & 0xFF);
+    uint8_t a2 = ((data >> 9) & 0x1);
     bool write = data & 0x1;
     uint8_t output_data = 0;
 
-    if (address == 0x64) {
+    if (write) {
+      // Serial1.printf("Bus Message: Data: 0x%08X, A2: 0x%05X, Value: 0x%02X write: %d\n", data, a2, value, write);
+    }
+
+    if (a2) {
       if (write) {
+        write_commands[command_write & 31] = value;
+        command_write++;
         process8042_64h_write(value);
       } else {
+        status_read++;
         output_data = status_register();
       }
-    } else if (address == 0x60) {
+    } else {
       if (write) {
+        write_datas[data_write & 31] = value;
+        data_write++;
         process8042_60h_write(value);
       } else {
+        data_read++;
         output_data = process8042_60h_read();
-      }
-    } else if (address == 0x61) {
-      if (write) {
-        pins61h = value;
-        gpio_put(26, pins61h & 1);
-        gpio_put(27, pins61h & 2);
-      } else {
-        output_data = pins61h;
       }
     }
 
     if (!write) {
+      // Serial1.printf("Bus Message: Data: 0x%08X, A2: 0x%05X, Value: 0x%02X write: %d\n", data, a2, output_data, write);
       pio_sm_put(pio_bus, sm_bus, output_data);
     }
 
 }
+
+#ifndef SIMULATE
 
 void tuh_mount_cb(uint8_t daddr) {
   Serial1.printf("Device attached, address = %d\r\n", daddr);
@@ -323,6 +388,12 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_re
 
   Serial1.printf("HID Interface Protocol = %s\r\n", protocol_str[itf_protocol]);
 
+  if (itf_protocol == HID_ITF_PROTOCOL_KEYBOARD) {
+    keyboard_addr = dev_addr;
+  } else if (itf_protocol == HID_ITF_PROTOCOL_MOUSE) {
+    mouse_addr = dev_addr;
+  }
+
   // By default, host stack will use boot protocol on supported interface.
   // Therefore for this simple example, we only need to parse generic report descriptor (with built-in parser)
   if (itf_protocol == HID_ITF_PROTOCOL_NONE) {
@@ -340,6 +411,11 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_re
 // Invoked when device with hid interface is un-mounted
 void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance) {
   Serial1.printf("HID device address = %d, instance = %d is unmounted\r\n", dev_addr, instance);
+  if (dev_addr == keyboard_addr) {
+    keyboard_addr = 0;
+  } else if (dev_addr == mouse_addr) {
+    mouse_addr = 0;
+  }
 }
 
 // Invoked when received report from device via interrupt endpoint
@@ -523,3 +599,4 @@ static void process_generic_report(uint8_t dev_addr, uint8_t instance, uint8_t c
     }
   }
 }
+#endif

@@ -15,7 +15,7 @@ init_video:
     mov byte [es:DATA_AREA_CURSOR_Y], 0
 
     mov dx, 0x3D8
-    mov al, 0b01001 ; high res text mode, output enabled
+    mov al, 0b10001001 ; high res text mode, output enabled, clear screen
     out dx, al
 
     ret
@@ -98,18 +98,18 @@ int10_handler:
 
 .set_mode_text:
     mov dx, 0x3D8
-    mov al, 0b01001 ; high res text mode, output enabled
+    mov al, 0b10001001 ; high res text mode, output enabled. b7 indicates force clear
     jmp .set_save_and_done
 
 .set_mode_cga:
     mov dx, 0x3D8
-    mov al, 0b01010 ; low res graphics mode, output enabled
+    mov al, 0b10001010 ; low res graphics mode, output enabled. b7 indicates force clear
     mov bl, 40 ; 40 columns in low res graphics mode
     jmp .set_save_and_done
 
 .set_mode_cga_high_res:
     mov dx, 0x3D8
-    mov al, 0b11010 ; high res graphics mode, output enabled
+    mov al, 0b10011010 ; high res graphics mode, output enabled. b7 indicates force clear
     jmp .set_save_and_done
 
 .set_mode_ega:
