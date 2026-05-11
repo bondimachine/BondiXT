@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include "hid_to_scancode.h"
 
+// #define SIMULATE
+
 #ifndef SIMULATE
 
 #include <Adafruit_TinyUSB.h>
@@ -24,9 +26,7 @@ Adafruit_USBH_Host USBHost;
 ; Pin 8: /CS (Base+8) (!A9 & !A8 & !A7 & A6 & A5 & !A4 & !A0 & IO & !ALE) (60 - 6F excluding 61)
 ; Pin 9: \WR & \RD (Base+9)
 ; Pin 10: DT/R (Base+10)
-; Pin 11: READY
-; Pin 12: CLK
-; Pin 13: A2
+; Pin 15: A2
 ; Pin 26: Keyboard Interrupt
 ; Pin 27: Mouse Interrupt
 
@@ -35,7 +35,12 @@ bool callback = false;
 
 PIO pio_bus = pio0;
 int sm_bus = -1;
+
+#ifndef SIMULATE    
 uint8_t keyboard_addr = 0;
+#else
+uint8_t keyboard_addr = 1;
+#endif
 uint8_t mouse_addr = 0;
 
 volatile uint32_t command_write = 0;
@@ -44,6 +49,41 @@ volatile uint32_t data_read = 0;
 volatile uint32_t data_write = 0;
 volatile uint8_t write_commands[32] = {0};
 volatile uint8_t write_datas[32] = {0};
+
+
+volatile uint8_t command_byte = 0b01000111;
+
+volatile uint8_t next60h_write = 0;
+volatile uint8_t after_ack = 0;
+volatile bool has_next60h_read = false;
+volatile bool keyboard_enabled = true;
+volatile bool mouse_enabled = false;
+
+
+// Circular buffer for keyboard/mouse data
+struct KbdBufferItem {
+  uint8_t data;
+  bool is_mouse;
+};
+
+#define DATA_BUF_SIZE 16
+KbdBufferItem data_buffer[DATA_BUF_SIZE];
+volatile uint8_t data_head = 0;
+volatile uint8_t data_tail = 0;
+volatile uint8_t data_count = 0;
+
+
+inline uint8_t status_register(bool command_response = false, bool is_mouse = false) {
+  bool has_data = data_count > 0;
+  return 0x4 | ((is_mouse || (has_data && data_buffer[data_tail].is_mouse)) << 5) | (has_data || command_response > 0);
+}
+
+void set_next_60h_read(uint8_t data, bool is_mouse = false) {
+  has_next60h_read = data > 0;
+  uint32_t next_read = status_register(data, is_mouse) << 8 | data;
+  pio_sm_put(pio_bus, sm_bus, next_read);
+  // Serial.printf("Setting next 60h read: 0x%x\n", next_read);
+}
 
 void setup() {
 #ifndef SIMULATE  
@@ -86,27 +126,10 @@ void setup1() {
 
   bus_program_init(pio_bus, sm_bus, offset_bus, 0);
 
+  // set the first value of the bus buffer
+  set_next_60h_read(0x00);
+
 }
-
-volatile uint8_t command_byte = 0b01000111;
-
-volatile uint8_t next60h = 0;
-volatile uint8_t after_ack = 0;
-volatile bool keyboard_enabled = true;
-volatile bool mouse_enabled = false;
-
-
-// Circular buffer for keyboard/mouse data
-struct KbdBufferItem {
-  uint8_t data;
-  bool is_mouse;
-};
-
-#define DATA_BUF_SIZE 16
-KbdBufferItem data_buffer[DATA_BUF_SIZE];
-volatile uint8_t data_head = 0;
-volatile uint8_t data_tail = 0;
-volatile uint8_t data_count = 0;
 
 void data_buf_write(uint8_t data, bool is_mouse) {
 
@@ -118,10 +141,15 @@ void data_buf_write(uint8_t data, bool is_mouse) {
     return;
   }
 
-  if (data_count < DATA_BUF_SIZE) {
-    data_buffer[data_head] = {data, is_mouse};
-    data_head = (data_head + 1) % DATA_BUF_SIZE;
-    data_count++;
+  if (has_next60h_read) {
+    if (data_count < DATA_BUF_SIZE) {
+      data_buffer[data_head] = {data, is_mouse};
+      data_head = (data_head + 1) % DATA_BUF_SIZE;
+      data_count++;
+    }
+  } else {
+    // first byte, just set it
+    set_next_60h_read(data, is_mouse);
   }
 
   if (is_mouse && (command_byte & 0b10)) {
@@ -150,13 +178,21 @@ void process8042_64h_write(uint8_t command) {
 
   switch (command) {
     case 0x20: // read keyboard command byte
-    case 0x60: // write keyboard command byte. bit 6 = 0 => enable mouse
+      set_next_60h_read(command_byte);
+      break;
     case 0xEE: // diagnostic, return EE
-    case 0xA9: // test mouse, return 0 in data
+      set_next_60h_read(0xEE);
+      break;
     case 0xAA: // test, return 55h in data
+      set_next_60h_read(keyboard_addr > 0 ? 0x55 : 0);
+      break;
+    case 0xA9: // test mouse, return 0 in data
     case 0xAB: // keyboard test, return 0 in data
+      set_next_60h_read(0);
+      break;
+    case 0x60: // write keyboard command byte. bit 6 = 0 => enable mouse
     case 0xD4: // write to mouse port
-      next60h = command;
+      next60h_write = command;
       break;
     case 0xAD: // disable keyboard
       keyboard_enabled = false;
@@ -177,106 +213,76 @@ void process8042_64h_write(uint8_t command) {
   }
 }
 
-uint8_t process8042_60h_read() {
-  switch (next60h) {
-    case 0: {// read data byte
-      uint8_t data = data_buf_read();
-      return data;
-    }  
-    case 0x20: // read keyboard command byte
-      next60h = 0;
-      return command_byte;
-    case 0xA9: // test mouse, return 0 in data
-    case 0xAB: // keyboard test, return 0 in data
-      next60h = 0;
-      return 0;
-    case 0xAA: // test, return 55h in data
-      next60h = 0;      
-      return keyboard_addr > 0 ? 0x55 : 0;
-    case 0xEE: // diagnostic, return EE
-      next60h = 0;
-      return 0xEE;
-    case 0xC0: // get scancode (internal)
-      next60h = 0;
-      return 0x43;
-    case 0xF2: // mouse id
-      return 0x03;
-    case 0xFA: // ack
-      next60h = after_ack;
-      return 0xFA;
+void process8042_60h_read() {
+  // push next byte for 60h read
+  uint8_t data = after_ack;
+  if (!data) {
+      data = data_buf_read();
   }
-  return 0;
+  set_next_60h_read(data);
 }
 
 void process8042_60h_write(uint8_t value) {
 
-  switch (next60h) {
+  switch (next60h_write) {
     case 0x60:
       command_byte = value;
       mouse_enabled = !(value & 0b00100000);
       keyboard_enabled = !(value & 0b00010000);
-      next60h = 0xFA;
+      next60h_write = 0;
+      set_next_60h_read(0xFA);
       return;
     case 0xCD: // write leds value (internal)
       // TODO set the leds
-      next60h = 0xFA;
+      set_next_60h_read(0xFA);
+      next60h_write = 0;
       return;
     case 0xC3: // set autorepeat (internal)
       // TODO set 
-      next60h = 0xFA;
+      set_next_60h_read(0xFA);
+      next60h_write = 0;
       return;
     case 0xC0: // select scancode value (internal)
-      next60h = 0xFA;
+      set_next_60h_read(0xFA);
+      next60h_write = 0;
       return;
     // case 0xD4: // write to mouse port, only care for id, see below.
   }
 
   switch (value) {
     case 0xED: // leds
-      next60h = 0xCD;
+      set_next_60h_read(0xCD);
       break;
     case 0xEE: // diagnostic, return EE
-      next60h = 0xEE;
+      set_next_60h_read(0xEE);
       break;
     case 0xF0: // select scancode
-      next60h = 0xC0;
+      set_next_60h_read(0x43);
       break;
     case 0xF3: // set autorepeat;
-      next60h = 0xC3;
+      set_next_60h_read(0xC3);
       break;
     case 0xF2:
-      if (next60h == 0xD4) {
-        after_ack = 0xF2;
+      if (next60h_write == 0xD4) {
+        next60h_write = 0;
+        after_ack = 0x03; // mouse id
       } else {
         // we are "ancient AT keyboard" so we don't respond anything
         after_ack = 0;
       }
-      next60h = 0xFA;
+      set_next_60h_read(0xFA);
       break;
     case 0xF4: // enable scanning
-      next60h = 0xFA;
+      set_next_60h_read(0xFA);
       break;      
     case 0xF5: // disable scanning
-      next60h = 0xFA;
+      set_next_60h_read(0xFA);
       break;      
   }
 }
 
-inline uint8_t status_register() {
-  bool has_data = data_count > 0;
-  return 0x4 | ((has_data && data_buffer[data_tail].is_mouse) << 5) | (has_data || next60h > 0);
-}
-
-#ifndef SIMULATE
-void loop() {
+static void inline stats() {
     static uint32_t last_print = 0;
-    USBHost.task();
-    if (Serial1.available()) {
-        int inByte = Serial1.read();
-        if (inByte == 'r') {
-          reset_usb_boot(0,0);
-        }
-    }
     if (millis() - last_print > 1000) {
       Serial1.printf("64r: %05d, 64w: %05d, 60r: %05d, 60w: %05d, K: %d, M: %d\n", status_read, command_write, data_read, data_write, keyboard_enabled, mouse_enabled);
       for (uint32_t i = 0; i < (command_write & 31); i++) {
@@ -291,60 +297,83 @@ void loop() {
       data_write = 0;
       last_print = millis();
     }
-    
+}
+
+#ifndef SIMULATE
+void loop() {
+    USBHost.task();
+    if (Serial1.available()) {
+        int inByte = Serial1.read();
+        if (inByte == 'r') {
+          reset_usb_boot(0,0);
+        }
+    }
+    stats();
 }
 #else
 
 void loop() {
     if (Serial1.available()) {
+        bool shift = false;
         int inByte = Serial1.read();
         uint8_t base = ascii2scancode(inByte);
+        if (!base) {
+          if (inByte == ':') {
+            shift = true;
+            data_buf_write(0x2A, false); // press shift
+            base = ascii2scancode(';');
+          }
+        }
         data_buf_write(base, false);
         data_buf_write(base | 0x80, false);
+        if (shift) {
+          data_buf_write(0x2A | 0x80, false);
+        }
         Serial1.printf("Simulated key press: %c (0x%02X)\n", inByte, base);
     }
+    stats();
 }
 
 #endif
 
 void loop1() {
-    uint32_t data = pio_sm_get_blocking(pio_bus, sm_bus);
 
-    // Format from bus.pio:
-    // ISR = [a2 (1) << 9  | Data (8) << 1 | Flag (1)]
+    uint32_t rxempty_mask = (1u << (PIO_FSTAT_RXEMPTY_LSB + sm_bus));
 
-    uint8_t value = (data >> 1) & 0xFF;
-    uint8_t a2 = ((data >> 9) & 0x1);
-    bool write = data & 0x1;
-    uint8_t output_data = 0;
+    for(;;) {
+      while ((pio_bus->fstat & rxempty_mask) != 0) {}
+      uint32_t data = pio_bus->rxf[sm_bus];
 
-    if (write) {
-      // Serial1.printf("Bus Message: Data: 0x%08X, A2: 0x%05X, Value: 0x%02X write: %d\n", data, a2, value, write);
-    }
+      // Format from bus.pio:
+      // ISR = [a2 (1) << 9  | Data (8) << 1 | Flag (1)]
 
-    if (a2) {
-      if (write) {
-        write_commands[command_write & 31] = value;
-        command_write++;
-        process8042_64h_write(value);
+      uint8_t value = (data >> 1) & 0xFF;
+      uint8_t a2 = ((data >> 9) & 0x1);
+      bool write = data & 0x1;
+      uint8_t output_data = 0;
+
+      // if (!write) {
+      //   Serial1.printf("Bus Message: Data: 0x%08X, A2: 0x%05X, Value: 0x%02X write: %d\n", data, a2, value, write);
+      // }
+
+      if (a2) {
+        if (write) {
+          process8042_64h_write(value);
+          write_commands[command_write & 31] = value;
+          command_write++;
+        } else {
+          status_read++;
+        }
       } else {
-        status_read++;
-        output_data = status_register();
+        if (write) {
+          process8042_60h_write(value);
+          write_datas[data_write & 31] = value;
+          data_write++;
+        } else {
+          process8042_60h_read();
+          data_read++;
+        }
       }
-    } else {
-      if (write) {
-        write_datas[data_write & 31] = value;
-        data_write++;
-        process8042_60h_write(value);
-      } else {
-        data_read++;
-        output_data = process8042_60h_read();
-      }
-    }
-
-    if (!write) {
-      // Serial1.printf("Bus Message: Data: 0x%08X, A2: 0x%05X, Value: 0x%02X write: %d\n", data, a2, output_data, write);
-      pio_sm_put(pio_bus, sm_bus, output_data);
     }
 
 }

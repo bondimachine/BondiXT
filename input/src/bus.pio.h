@@ -13,41 +13,48 @@
 // --- //
 
 #define bus_wrap_target 0
-#define bus_wrap 22
+#define bus_wrap 29
 #define bus_pio_version 0
 
 static const uint16_t bus_program_instructions[] = {
             //     .wrap_target
     0x20a8, //  0: wait   1 pin, 8
-    0x2028, //  1: wait   0 pin, 8
-    0xa0e0, //  2: mov    osr, pins
-    0x606f, //  3: out    null, 15
-    0x40e1, //  4: in     osr, 1
-    0x00d4, //  5: jmp    pin, 20
-    0x4069, //  6: in     null, 9
-    0xe081, //  7: set    pindirs, 1
-    0xe000, //  8: set    pins, 0
-    0x2029, //  9: wait   0 pin, 9
-    0x80a0, // 10: pull   block
-    0xa007, // 11: mov    pins, osr
-    0xa0e2, // 12: mov    osr, y
-    0x6088, // 13: out    pindirs, 8
-    0x20ae, // 14: wait   1 pin, 14
-    0xe080, // 15: set    pindirs, 0
-    0x20a9, // 16: wait   1 pin, 9
-    0xa0e3, // 17: mov    osr, null
-    0x6088, // 18: out    pindirs, 8
-    0x0000, // 19: jmp    0
-    0x2029, // 20: wait   0 pin, 9
-    0x4008, // 21: in     pins, 8
-    0x4041, // 22: in     y, 1
+    0x8080, //  1: pull   noblock
+    0xa027, //  2: mov    x, osr
+    0x00c1, //  3: jmp    pin, 1
+    0xa0e0, //  4: mov    osr, pins
+    0x606a, //  5: out    null, 10
+    0x40e1, //  6: in     osr, 1
+    0xa046, //  7: mov    y, isr
+    0xa0c3, //  8: mov    isr, null
+    0x6065, //  9: out    null, 5
+    0x40e1, // 10: in     osr, 1
+    0x009a, // 11: jmp    y--, 26
+    0xa046, // 12: mov    y, isr
+    0x2029, // 13: wait   0 pin, 9
+    0x8080, // 14: pull   noblock
+    0xa027, // 15: mov    x, osr
+    0x0072, // 16: jmp    !y, 18
+    0x6068, // 17: out    null, 8
+    0xa007, // 18: mov    pins, osr
+    0xa0eb, // 19: mov    osr, ~null
+    0x6088, // 20: out    pindirs, 8
+    0xa0e3, // 21: mov    osr, null
+    0x20a9, // 22: wait   1 pin, 9
+    0x6088, // 23: out    pindirs, 8
+    0x4069, // 24: in     null, 9
+    0x0000, // 25: jmp    0
+    0x2029, // 26: wait   0 pin, 9
+    0x4008, // 27: in     pins, 8
+    0xa04b, // 28: mov    y, ~null
+    0x4041, // 29: in     y, 1
             //     .wrap
 };
 
 #if !PICO_NO_HARDWARE
 static const struct pio_program bus_program = {
     .instructions = bus_program_instructions,
-    .length = 23,
+    .length = 30,
     .origin = -1,
     .pio_version = bus_pio_version,
 #if PICO_PIO_VERSION > 0
@@ -67,7 +74,7 @@ static inline void bus_program_init(PIO pio, uint sm, uint offset, uint base_pin
     sm_config_set_in_pins(&c, base_pin);
     sm_config_set_out_pins(&c, base_pin, 8);
     sm_config_set_set_pins(&c, base_pin + 11, 1);
-    sm_config_set_jmp_pin(&c, base_pin + 10);
+    sm_config_set_jmp_pin(&c, base_pin + 8);
     // 2. Configure Shift Directions
     // IN Shift: Left, Autopush ON
     // ISR = (ISR << count) | Input.
@@ -84,8 +91,6 @@ static inline void bus_program_init(PIO pio, uint sm, uint offset, uint base_pin
     // 4. Set Pin Directions (All Input initially)
     pio_sm_set_consecutive_pindirs(pio, sm, base_pin, 12, false);
     pio_sm_set_consecutive_pindirs(pio, sm, base_pin + 14, 2, false);
-    // 5. Pre-load Y register with 0xFFFFFFFF
-    pio_sm_exec(pio, sm, pio_encode_mov_not(pio_y, pio_null));
     // 6. Init and Enable
     pio_sm_init(pio, sm, offset, &c);
     pio_sm_set_enabled(pio, sm, true);

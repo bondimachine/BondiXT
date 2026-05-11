@@ -4,8 +4,6 @@
 ; Pin 8: /CS (Base+8) (!A8 && !A9 && IO && !ALE)
 ; Pin 9: \WR & \RD (Base+9)
 ; Pin 10: DT/R (Base+10)
-; Pin 11: READY
-; Pin 14: CLK
 ; Pin 15: A2
 
 ; Packet Format sent to CPU (RX FIFO):
@@ -19,46 +17,56 @@
 restart:
     ; Wait for /CS High (De-assertion)
     wait 1 pin 8
-    ; 1. Wait for /CS (Active Low)
-    wait 0 pin 8
+
+wait_for_something:
+    pull noblock; Read any possible update from for output buffer, or returns current value of x
+    mov x, osr; save update if any.
+
+    jmp pin wait_for_something; CS is high, need to keep waiting.
 
     mov osr, pins
-    out NULL, 15
+    out NULL, 10
+    in osr, 1 ; read DT/R
+    mov y, isr ; y = DT/R (0 for Read, 1 for Write)
 
+
+    mov isr, null
+    out NULL, 5
     in osr, 1 ; read A2
 
     ; 3. Check /RD
-    jmp pin write
+    jmp y-- write
 
     ; === READ CYCLE ===
     ; DT/R is LOW (Read).
+    mov y, isr ; y = A2
     
-    ; ISR: [ (Address << 9)], autopush
-    in null, 9;
-    
-    set pindirs, 1; set IOCHREADY as output
-    set pins, 0; set IOCHREADY dn
-
     wait 0 pin 9; // Wait for /RD to go low
 
-    ; Wait for Data from TX FIFO (from CPU).
-    pull block
+    pull noblock; Read any possible update from for output buffer, or returns current value of x 
+    mov x, osr; save update if any.
+    jmp !y read60
+
+    out null, 8 ; status register is on the upper 8 bits, so we shift it right
+
+read60:
 
     ; Drive Data on AD0-AD7
     mov pins, osr
-    mov osr, y
-    ; Enable Output Driver (Set AD0-AD7 to Output)
-    out pindirs, 8
 
-    wait 1 pin 14; // Wait for CLK high
-    set pindirs, 0; set IOCHREADY as high impedance
+    ; Enable Output Driver (Set AD0-AD7 to Output)
+    mov osr, ~null
+    out pindirs, 8
+    mov osr, null
 
     ; Wait for /RD High (End of Read)
     wait 1 pin 9
 
     ; Disable Output Driver (Set pins to Input)
-    mov osr, null
     out pindirs, 8   
+    
+    ; ISR: [ (Address << 9)], autopush
+    in null, 9;
 
     jmp restart
 
@@ -74,6 +82,8 @@ write:
 
     ; Add Flag: 0x00 for Write
     ; ISR: [ (Address << 9) | (Data << 1) | 0b1 ], autopush
+
+    mov y, ~null
     in y, 1
 
 .wrap
@@ -86,7 +96,7 @@ static inline void bus_program_init(PIO pio, uint sm, uint offset, uint base_pin
     sm_config_set_in_pins(&c, base_pin);
     sm_config_set_out_pins(&c, base_pin, 8);
     sm_config_set_set_pins(&c, base_pin + 11, 1);
-    sm_config_set_jmp_pin(&c, base_pin + 10);
+    sm_config_set_jmp_pin(&c, base_pin + 8);
 
     // 2. Configure Shift Directions
     // IN Shift: Left, Autopush ON
@@ -107,9 +117,6 @@ static inline void bus_program_init(PIO pio, uint sm, uint offset, uint base_pin
     // 4. Set Pin Directions (All Input initially)
     pio_sm_set_consecutive_pindirs(pio, sm, base_pin, 12, false);
     pio_sm_set_consecutive_pindirs(pio, sm, base_pin + 14, 2, false);
-
-    // 5. Pre-load Y register with 0xFFFFFFFF
-    pio_sm_exec(pio, sm, pio_encode_mov_not(pio_y, pio_null));
 
     // 6. Init and Enable
     pio_sm_init(pio, sm, offset, &c);
