@@ -23,11 +23,11 @@ static const uint16_t bus_program_instructions[] = {
     0xa027, //  2: mov    x, osr
     0x00c1, //  3: jmp    pin, 1
     0xa0e0, //  4: mov    osr, pins
-    0x606a, //  5: out    null, 10
+    0x606e, //  5: out    null, 14
     0x40e1, //  6: in     osr, 1
     0xa046, //  7: mov    y, isr
     0xa0c3, //  8: mov    isr, null
-    0x6065, //  9: out    null, 5
+    0x6061, //  9: out    null, 1
     0x40e1, // 10: in     osr, 1
     0x009a, // 11: jmp    y--, 26
     0xa046, // 12: mov    y, isr
@@ -40,11 +40,11 @@ static const uint16_t bus_program_instructions[] = {
     0xa0eb, // 19: mov    osr, ~null
     0x6088, // 20: out    pindirs, 8
     0xa0e3, // 21: mov    osr, null
-    0x20a9, // 22: wait   1 pin, 9
+    0x20ba, // 22: wait   1 pin, 26
     0x6088, // 23: out    pindirs, 8
     0x4069, // 24: in     null, 9
     0x0000, // 25: jmp    0
-    0x2029, // 26: wait   0 pin, 9
+    0x203a, // 26: wait   0 pin, 26
     0x4008, // 27: in     pins, 8
     0xa04b, // 28: mov    y, ~null
     0x4041, // 29: in     y, 1
@@ -72,9 +72,8 @@ static inline void bus_program_init(PIO pio, uint sm, uint offset, uint base_pin
     pio_sm_config c = bus_program_get_default_config(offset);
     // 1. Configure Pin Mappings
     sm_config_set_in_pins(&c, base_pin);
-    sm_config_set_out_pins(&c, base_pin, 8);
-    sm_config_set_set_pins(&c, base_pin + 11, 1);
-    sm_config_set_jmp_pin(&c, base_pin + 8);
+    sm_config_set_out_pins(&c, base_pin, 8); // D0-D7
+    sm_config_set_jmp_pin(&c, base_pin + 8); // CS
     // 2. Configure Shift Directions
     // IN Shift: Left, Autopush ON
     // ISR = (ISR << count) | Input.
@@ -83,14 +82,16 @@ static inline void bus_program_init(PIO pio, uint sm, uint offset, uint base_pin
     // OUT Shift: Right, Autopull OFF
     sm_config_set_out_shift(&c, true, false, 32);
     // 3. Initialize GPIOs
-    for (uint i = 0; i <= 11; i++) {
+    for (uint i = 0; i <= 8; i++) {
         pio_gpio_init(pio, base_pin + i);
     }
     pio_gpio_init(pio, base_pin + 14);
     pio_gpio_init(pio, base_pin + 15);
+    pio_gpio_init(pio, base_pin + 26);
     // 4. Set Pin Directions (All Input initially)
-    pio_sm_set_consecutive_pindirs(pio, sm, base_pin, 12, false);
+    pio_sm_set_consecutive_pindirs(pio, sm, base_pin, 8, false);
     pio_sm_set_consecutive_pindirs(pio, sm, base_pin + 14, 2, false);
+    pio_sm_set_consecutive_pindirs(pio, sm, base_pin + 26, 1, false);
     // 6. Init and Enable
     pio_sm_init(pio, sm, offset, &c);
     pio_sm_set_enabled(pio, sm, true);

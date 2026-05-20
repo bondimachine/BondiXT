@@ -22,39 +22,39 @@ start:
     ; Wait for vsync before filling screen
     call wait_vsync
 
-    mov ah, 0x01      ; Function 01h: Send character
-    mov dx, 0         ; COM1
-    mov al, bl
-    mov cl, 4
-    shr al, cl
-    cmp al, 10
-    jl .is_digit
-    add al, 'A' - 10
-    jmp .send_char
-.is_digit:
-    add al, '0'
-.send_char:
-    int 0x14
+    ; Read current ticks from BIOS
+    mov ah, 0x00
+    int 0x1A          ; CX = high word, DX = low word
 
-    mov ah, 0x01      ; Function 01h: Send character
-    mov al, bl
-    and al, 0x0F
-    cmp al, 10
-    jl .is_digit2
-    add al, 'A' - 10
-    jmp .send_char2
-.is_digit2:
-    add al, '0'
-.send_char2:
-    int 0x14
+    ; Print CX (high-order word of system clock count)
+    mov ax, cx
+    call print_serial_hex16
 
-    mov ah, 0x01
+    ; Print ':'
+    mov al, ':'
+    call send_serial_char
+
+    ; Print DX (low-order word of system clock count)
+    mov ax, dx
+    call print_serial_hex16
+
+    ; Print ' - ' separator
+    mov al, ' '
+    call send_serial_char
+    mov al, '-'
+    call send_serial_char
+    mov al, ' '
+    call send_serial_char
+
+    ; Print BL (current color)
+    mov al, bl
+    call print_serial_hex8
+
+    ; Print carriage return and line feed
     mov al, 0x0D
-    int 0x14
-
-    mov ah, 0x01
+    call send_serial_char
     mov al, 0x0A
-    int 0x14
+    call send_serial_char
 
     ; Point ES to video memory
     mov ax, 0xA000
@@ -86,6 +86,57 @@ wait_vsync:
     and al, 0x08
     jz .wait_in_vsync
     
+    ret
+
+send_serial_char:
+    ; Sends character in AL to COM1 (port dx=0)
+    push dx
+    push ax
+    mov ah, 0x01
+    mov dx, 0
+    int 0x14
+    pop ax
+    pop dx
+    ret
+
+print_serial_hex8:
+    ; Prints AL as 2 hex characters
+    push cx
+    push ax
+    
+    ; High nibble
+    mov cl, 4
+    shr al, cl
+    call .print_nibble
+    
+    ; Low nibble
+    pop ax
+    push ax
+    and al, 0x0F
+    call .print_nibble
+
+    pop ax
+    pop cx
+    ret
+
+.print_nibble:
+    cmp al, 10
+    jl .is_digit
+    add al, 'A' - 10
+    jmp .send
+.is_digit:
+    add al, '0'
+.send:
+    call send_serial_char
+    ret
+
+print_serial_hex16:
+    ; Prints AX as 4 hex characters
+    push ax
+    mov al, ah
+    call print_serial_hex8
+    pop ax
+    call print_serial_hex8
     ret
 
     ; times 510-($-$$) db 0

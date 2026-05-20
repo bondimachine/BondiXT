@@ -22,15 +22,28 @@ Adafruit_USBH_Host USBHost;
 #include "bus.pio.h"
 
 /*
-; Pins 0-7: D0-D7 (Base+0 to Base+7)
-; Pin 8: /CS (Base+8) (!A9 & !A8 & !A7 & A6 & A5 & !A4 & !A0 & IO & !ALE) (60 - 6F excluding 61)
-; Pin 9: \WR & \RD (Base+9)
-; Pin 10: DT/R (Base+10)
+; Pins 0-7: D0-D7 
+; Pin 8: /CS (!A8 && !A9 && IO && !ALE)
+
+; Pin 14: DT/R 
 ; Pin 15: A2
-; Pin 26: Keyboard Interrupt
-; Pin 27: Mouse Interrupt
+; Pin 26: \WR & \RD 
+; Pin 27: Keyboard Interrupt
+; Pin 28: PS/2 Keyboard Clock (optional)
+; Pin 29: PS/2 Keyboard Data (optional)
+
+; Feels weird but pinout was thought for having a Pi Pico Zero potentially connected
+; just with the side headers
+
+; Pin 9: Mouse Interrupt (optional)
+; Pin 10: PS/2 Mouse Clock (optional)
+; Pin 11: PS/2 Mouse Data (optional)
 
 */
+
+#define KEYBOARD_INTERRUPT_PIN 27
+#define MOUSE_INTERRUPT_PIN 9
+
 bool callback = false;
 
 PIO pio_bus = pio0;
@@ -103,11 +116,11 @@ void setup() {
       Serial1.println("Failed to initialize USB Host");
     }; // 0 means use native RP2040 host
 #endif
-    pinMode(26, OUTPUT);
-    digitalWrite(26, LOW);
+    pinMode(KEYBOARD_INTERRUPT_PIN, OUTPUT);
+    digitalWrite(KEYBOARD_INTERRUPT_PIN, LOW);
 
-    pinMode(27, OUTPUT);
-    digitalWrite(27, LOW);
+    pinMode(MOUSE_INTERRUPT_PIN, OUTPUT);
+    digitalWrite(MOUSE_INTERRUPT_PIN, LOW);
 
     Serial1.println("Started");
 
@@ -154,15 +167,15 @@ void data_buf_write(uint8_t data, bool is_mouse) {
 
   if (is_mouse && (command_byte & 0b10)) {
     // Mouse Interupt
-    gpio_put(27 , true);
+    gpio_put(MOUSE_INTERRUPT_PIN , true);
     // at least 100 ns
     __asm("nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop;");
-    gpio_put(27, false);
+    gpio_put(MOUSE_INTERRUPT_PIN, false);
   } else if (!is_mouse && (command_byte & 0b1)) {
     // Keyboard Interrupt
-    gpio_put(26, true);
+    gpio_put(KEYBOARD_INTERRUPT_PIN, true);
     __asm("nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop;");
-    gpio_put(26, false);
+    gpio_put(KEYBOARD_INTERRUPT_PIN, false);
   }
 }
 

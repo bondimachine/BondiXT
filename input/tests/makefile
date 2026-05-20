@@ -1,7 +1,7 @@
 # makefile.mak
 
-ASM = keyboard.asm
-BIN = keyboard.com
+ASM = keyint.asm
+BIN = keyint.com
 NASM_FLAGS = -O0
 
 all: $(BIN)
