@@ -1,5 +1,5 @@
-#include <Arduino.h>
 #include "hid_to_scancode.h"
+#include <Arduino.h>
 
 // #define SIMULATE
 
@@ -8,7 +8,7 @@
 #include <Adafruit_TinyUSB.h>
 
 #if not(CFG_TUD_HID)
-  #error "No HID support"
+#error "No HID support"
 #endif
 
 Adafruit_USBH_Host USBHost;
@@ -22,18 +22,18 @@ Adafruit_USBH_Host USBHost;
 #include "bus.pio.h"
 
 /*
-; Pins 0-7: D0-D7 
+; Pins 0-7: D0-D7
 ; Pin 8: /CS (!A8 && !A9 && IO && !ALE)
 
-; Pin 14: DT/R 
+; Pin 14: DT/R
 ; Pin 15: A2
-; Pin 26: \WR & \RD 
+; Pin 26: \WR & \RD
 ; Pin 27: Keyboard Interrupt
 ; Pin 28: PS/2 Keyboard Clock (optional)
 ; Pin 29: PS/2 Keyboard Data (optional)
 
-; Feels weird but pinout was thought for having a Pi Pico Zero potentially connected
-; just with the side headers
+; Feels weird but pinout was thought for having a Pi Pico Zero potentially
+connected ; just with the side headers
 
 ; Pin 9: Mouse Interrupt (optional)
 ; Pin 10: PS/2 Mouse Clock (optional)
@@ -43,13 +43,103 @@ Adafruit_USBH_Host USBHost;
 
 #define KEYBOARD_INTERRUPT_PIN 27
 #define MOUSE_INTERRUPT_PIN 9
+#define PS2_CLK_PIN 28
+#define PS2_DATA_PIN 29
+
+#include "ps2_translation.h"
+
+#define PS2_RAW_BUF_SIZE 64
+volatile uint8_t ps2_raw_buf[PS2_RAW_BUF_SIZE];
+volatile uint8_t ps2_raw_head = 0;
+volatile uint8_t ps2_raw_tail = 0;
+
+volatile uint8_t ps2_bit_count = 0;
+volatile uint8_t ps2_data_byte = 0;
+volatile uint32_t ps2_last_interrupt_time = 0;
+volatile bool ps2_keyboard_connected = false;
+
+void ps2_raw_push(uint8_t val) {
+  uint8_t next_head = (ps2_raw_head + 1) % PS2_RAW_BUF_SIZE;
+  if (next_head != ps2_raw_tail) {
+    ps2_raw_buf[ps2_raw_head] = val;
+    ps2_raw_head = next_head;
+  }
+}
+
+bool ps2_raw_has_data() { return ps2_raw_head != ps2_raw_tail; }
+
+uint8_t ps2_raw_pop() {
+  if (ps2_raw_head == ps2_raw_tail)
+    return 0;
+  uint8_t val = ps2_raw_buf[ps2_raw_tail];
+  ps2_raw_tail = (ps2_raw_tail + 1) % PS2_RAW_BUF_SIZE;
+  return val;
+}
+
+void ps2_clock_isr() {
+  uint32_t now = micros();
+  if (now - ps2_last_interrupt_time > 2000) {
+    ps2_bit_count = 0;
+  }
+  ps2_last_interrupt_time = now;
+
+  uint8_t bit = gpio_get(PS2_DATA_PIN);
+  if (ps2_bit_count == 0) {
+    if (bit == 0) {
+      ps2_data_byte = 0;
+      ps2_bit_count++;
+    }
+  } else if (ps2_bit_count >= 1 && ps2_bit_count <= 8) {
+    if (bit) {
+      ps2_data_byte |= (1 << (ps2_bit_count - 1));
+    }
+    ps2_bit_count++;
+  } else if (ps2_bit_count == 9) {
+    ps2_bit_count++;
+  } else if (ps2_bit_count == 10) {
+    if (bit == 1) {
+      ps2_raw_push(ps2_data_byte);
+    }
+    ps2_bit_count = 0;
+  }
+}
+
+static bool ps2_is_e0 = false;
+static bool ps2_is_e1 = false;
+static bool ps2_is_f0 = false;
+
+void data_buf_write(uint8_t data, bool is_mouse);
+
+void process_ps2_byte(uint8_t byte) {
+  ps2_keyboard_connected = true;
+
+  if (byte == 0xE0) {
+    ps2_is_e0 = true;
+    data_buf_write(0xE0, false);
+  } else if (byte == 0xE1) {
+    ps2_is_e1 = true;
+    data_buf_write(0xE1, false);
+  } else if (byte == 0xF0) {
+    ps2_is_f0 = true;
+  } else {
+    uint8_t sc = scancode2_to_scancode1[byte];
+    if (ps2_is_f0) {
+      sc |= 0x80;
+    }
+    data_buf_write(sc, false);
+
+    ps2_is_f0 = false;
+    ps2_is_e0 = false;
+    ps2_is_e1 = false;
+  }
+}
 
 bool callback = false;
 
 PIO pio_bus = pio0;
 int sm_bus = -1;
 
-#ifndef SIMULATE    
+#ifndef SIMULATE
 uint8_t keyboard_addr = 0;
 #else
 uint8_t keyboard_addr = 1;
@@ -63,7 +153,6 @@ volatile uint32_t data_write = 0;
 volatile uint8_t write_commands[32] = {0};
 volatile uint8_t write_datas[32] = {0};
 
-
 volatile uint8_t command_byte = 0b01000111;
 
 volatile uint8_t next60h_write = 0;
@@ -71,7 +160,6 @@ volatile uint8_t after_ack = 0;
 volatile bool has_next60h_read = false;
 volatile bool keyboard_enabled = true;
 volatile bool mouse_enabled = false;
-
 
 // Circular buffer for keyboard/mouse data
 struct KbdBufferItem {
@@ -85,10 +173,12 @@ volatile uint8_t data_head = 0;
 volatile uint8_t data_tail = 0;
 volatile uint8_t data_count = 0;
 
-
-inline uint8_t status_register(bool command_response = false, bool is_mouse = false) {
+inline uint8_t status_register(bool command_response = false,
+                               bool is_mouse = false) {
   bool has_data = data_count > 0;
-  return 0x4 | ((is_mouse || (has_data && data_buffer[data_tail].is_mouse)) << 5) | (has_data || command_response > 0);
+  return 0x4 |
+         ((is_mouse || (has_data && data_buffer[data_tail].is_mouse)) << 5) |
+         (has_data || command_response > 0);
 }
 
 void set_next_60h_read(uint8_t data, bool is_mouse = false) {
@@ -99,35 +189,38 @@ void set_next_60h_read(uint8_t data, bool is_mouse = false) {
 }
 
 void setup() {
-#ifndef SIMULATE  
-    Serial1.setTX(12);
-    Serial1.setRX(13);
+#ifndef SIMULATE
+  Serial1.setTX(12);
+  Serial1.setRX(13);
 #endif
 
-    Serial1.begin(115200);
+  Serial1.begin(115200);
 
-#ifndef SIMULATE  
-    tuh_hid_mount_cb(0, 0, NULL, 0);
-    while(!callback) {
-      Serial1.println("Callbacks are not ours");
-    }
+#ifndef SIMULATE
+  tuh_hid_mount_cb(0, 0, NULL, 0);
+  while (!callback) {
+    Serial1.println("Callbacks are not ours");
+  }
 
-    if(!USBHost.begin(0)) {
-      Serial1.println("Failed to initialize USB Host");
-    }; // 0 means use native RP2040 host
+  if (!USBHost.begin(0)) {
+    Serial1.println("Failed to initialize USB Host");
+  }; // 0 means use native RP2040 host
 #endif
-    pinMode(KEYBOARD_INTERRUPT_PIN, OUTPUT);
-    digitalWrite(KEYBOARD_INTERRUPT_PIN, LOW);
+  pinMode(KEYBOARD_INTERRUPT_PIN, OUTPUT);
+  digitalWrite(KEYBOARD_INTERRUPT_PIN, LOW);
 
-    pinMode(MOUSE_INTERRUPT_PIN, OUTPUT);
-    digitalWrite(MOUSE_INTERRUPT_PIN, LOW);
+  pinMode(MOUSE_INTERRUPT_PIN, OUTPUT);
+  digitalWrite(MOUSE_INTERRUPT_PIN, LOW);
 
-    Serial1.println("Started");
+  pinMode(PS2_CLK_PIN, INPUT_PULLUP);
+  pinMode(PS2_DATA_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(PS2_CLK_PIN), ps2_clock_isr, FALLING);
 
+  Serial1.println("Started");
 }
 
 void setup1() {
-// --- Bus Interface Initialization ---
+  // --- Bus Interface Initialization ---
   // Using PIO0 for the Bus Interface
   // pio_bus is global
   unsigned int offset_bus = pio_add_program(pio_bus, &bus_program);
@@ -141,7 +234,6 @@ void setup1() {
 
   // set the first value of the bus buffer
   set_next_60h_read(0x00);
-
 }
 
 void data_buf_write(uint8_t data, bool is_mouse) {
@@ -167,20 +259,23 @@ void data_buf_write(uint8_t data, bool is_mouse) {
 
   if (is_mouse && (command_byte & 0b10)) {
     // Mouse Interupt
-    gpio_put(MOUSE_INTERRUPT_PIN , true);
+    gpio_put(MOUSE_INTERRUPT_PIN, true);
     // at least 100 ns
-    __asm("nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop;");
+    __asm("nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; "
+          "nop;");
     gpio_put(MOUSE_INTERRUPT_PIN, false);
   } else if (!is_mouse && (command_byte & 0b1)) {
     // Keyboard Interrupt
     gpio_put(KEYBOARD_INTERRUPT_PIN, true);
-    __asm("nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop;");
+    __asm("nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; nop; "
+          "nop;");
     gpio_put(KEYBOARD_INTERRUPT_PIN, false);
   }
 }
 
 uint8_t data_buf_read() {
-  if (data_count == 0) return 0;
+  if (data_count == 0)
+    return 0;
   uint8_t data = data_buffer[data_tail].data;
   data_tail = (data_tail + 1) % DATA_BUF_SIZE;
   data_count--;
@@ -190,39 +285,39 @@ uint8_t data_buf_read() {
 void process8042_64h_write(uint8_t command) {
 
   switch (command) {
-    case 0x20: // read keyboard command byte
-      set_next_60h_read(command_byte);
-      break;
-    case 0xEE: // diagnostic, return EE
-      set_next_60h_read(0xEE);
-      break;
-    case 0xAA: // test, return 55h in data
-      set_next_60h_read(keyboard_addr > 0 ? 0x55 : 0);
-      break;
-    case 0xA9: // test mouse, return 0 in data
-    case 0xAB: // keyboard test, return 0 in data
-      set_next_60h_read(0);
-      break;
-    case 0x60: // write keyboard command byte. bit 6 = 0 => enable mouse
-    case 0xD4: // write to mouse port
-      next60h_write = command;
-      break;
-    case 0xAD: // disable keyboard
-      keyboard_enabled = false;
-      // Serial1.println("keyboard disabled");
-      break;
-    case 0xAE: // enable keyboard
-      keyboard_enabled = true;
-      // Serial1.println("keyboard enabled");
-      break;
-    case 0xA7: // disable mouse
-      mouse_enabled = false;
-      // Serial1.println("mouse disabled");
-      break;
-    case 0xA8: // enable mouse
-      mouse_enabled = true;
-      // Serial1.println("mouse enabled");
-      break;
+  case 0x20: // read keyboard command byte
+    set_next_60h_read(command_byte);
+    break;
+  case 0xEE: // diagnostic, return EE
+    set_next_60h_read(0xEE);
+    break;
+  case 0xAA: // test, return 55h in data
+    set_next_60h_read((keyboard_addr > 0 || ps2_keyboard_connected) ? 0x55 : 0);
+    break;
+  case 0xA9: // test mouse, return 0 in data
+  case 0xAB: // keyboard test, return 0 in data
+    set_next_60h_read(0);
+    break;
+  case 0x60: // write keyboard command byte. bit 6 = 0 => enable mouse
+  case 0xD4: // write to mouse port
+    next60h_write = command;
+    break;
+  case 0xAD: // disable keyboard
+    keyboard_enabled = false;
+    // Serial1.println("keyboard disabled");
+    break;
+  case 0xAE: // enable keyboard
+    keyboard_enabled = true;
+    // Serial1.println("keyboard enabled");
+    break;
+  case 0xA7: // disable mouse
+    mouse_enabled = false;
+    // Serial1.println("mouse disabled");
+    break;
+  case 0xA8: // enable mouse
+    mouse_enabled = true;
+    // Serial1.println("mouse enabled");
+    break;
   }
 }
 
@@ -230,7 +325,7 @@ void process8042_60h_read() {
   // push next byte for 60h read
   uint8_t data = after_ack;
   if (!data) {
-      data = data_buf_read();
+    data = data_buf_read();
   }
   set_next_60h_read(data);
 }
@@ -238,157 +333,168 @@ void process8042_60h_read() {
 void process8042_60h_write(uint8_t value) {
 
   switch (next60h_write) {
-    case 0x60:
-      command_byte = value;
-      mouse_enabled = !(value & 0b00100000);
-      keyboard_enabled = !(value & 0b00010000);
-      next60h_write = 0;
-      set_next_60h_read(0xFA);
-      return;
-    case 0xCD: // write leds value (internal)
-      // TODO set the leds
-      set_next_60h_read(0xFA);
-      next60h_write = 0;
-      return;
-    case 0xC3: // set autorepeat (internal)
-      // TODO set 
-      set_next_60h_read(0xFA);
-      next60h_write = 0;
-      return;
-    case 0xC0: // select scancode value (internal)
-      set_next_60h_read(0xFA);
-      next60h_write = 0;
-      return;
+  case 0x60:
+    command_byte = value;
+    mouse_enabled = !(value & 0b00100000);
+    keyboard_enabled = !(value & 0b00010000);
+    next60h_write = 0;
+    set_next_60h_read(0xFA);
+    return;
+  case 0xCD: // write leds value (internal)
+    // TODO set the leds
+    set_next_60h_read(0xFA);
+    next60h_write = 0;
+    return;
+  case 0xC3: // set autorepeat (internal)
+    // TODO set
+    set_next_60h_read(0xFA);
+    next60h_write = 0;
+    return;
+  case 0xC0: // select scancode value (internal)
+    set_next_60h_read(0xFA);
+    next60h_write = 0;
+    return;
     // case 0xD4: // write to mouse port, only care for id, see below.
   }
 
   switch (value) {
-    case 0xED: // leds
-      set_next_60h_read(0xCD);
-      break;
-    case 0xEE: // diagnostic, return EE
-      set_next_60h_read(0xEE);
-      break;
-    case 0xF0: // select scancode
-      set_next_60h_read(0x43);
-      break;
-    case 0xF3: // set autorepeat;
-      set_next_60h_read(0xC3);
-      break;
-    case 0xF2:
-      if (next60h_write == 0xD4) {
-        next60h_write = 0;
-        after_ack = 0x03; // mouse id
-      } else {
-        // we are "ancient AT keyboard" so we don't respond anything
-        after_ack = 0;
-      }
-      set_next_60h_read(0xFA);
-      break;
-    case 0xF4: // enable scanning
-      set_next_60h_read(0xFA);
-      break;      
-    case 0xF5: // disable scanning
-      set_next_60h_read(0xFA);
-      break;      
+  case 0xED: // leds
+    set_next_60h_read(0xCD);
+    break;
+  case 0xEE: // diagnostic, return EE
+    set_next_60h_read(0xEE);
+    break;
+  case 0xF0: // select scancode
+    set_next_60h_read(0x43);
+    break;
+  case 0xF3: // set autorepeat;
+    set_next_60h_read(0xC3);
+    break;
+  case 0xF2:
+    if (next60h_write == 0xD4) {
+      next60h_write = 0;
+      after_ack = 0x03; // mouse id
+    } else {
+      // we are "ancient AT keyboard" so we don't respond anything
+      after_ack = 0;
+    }
+    set_next_60h_read(0xFA);
+    break;
+  case 0xF4: // enable scanning
+    set_next_60h_read(0xFA);
+    break;
+  case 0xF5: // disable scanning
+    set_next_60h_read(0xFA);
+    break;
   }
 }
 
 static void inline stats() {
-    static uint32_t last_print = 0;
-    if (millis() - last_print > 1000) {
-      Serial1.printf("64r: %05d, 64w: %05d, 60r: %05d, 60w: %05d, K: %d, M: %d\n", status_read, command_write, data_read, data_write, keyboard_enabled, mouse_enabled);
-      for (uint32_t i = 0; i < (command_write & 31); i++) {
-        Serial1.printf("64w: 0x%02X\n", write_commands[i]);
-      }
-      for (uint32_t i = 0; i < (data_write & 31); i++) {
-        Serial1.printf("60w: 0x%02X\n", write_datas[i]);
-      }
-      command_write = 0;
-      status_read = 0;
-      data_read = 0;
-      data_write = 0;
-      last_print = millis();
+  static uint32_t last_print = 0;
+  if (millis() - last_print > 1000) {
+    Serial1.printf("64r: %05d, 64w: %05d, 60r: %05d, 60w: %05d, K: %d, M: %d\n",
+                   status_read, command_write, data_read, data_write,
+                   keyboard_enabled, mouse_enabled);
+    for (uint32_t i = 0; i < (command_write & 31); i++) {
+      Serial1.printf("64w: 0x%02X\n", write_commands[i]);
     }
+    for (uint32_t i = 0; i < (data_write & 31); i++) {
+      Serial1.printf("60w: 0x%02X\n", write_datas[i]);
+    }
+    command_write = 0;
+    status_read = 0;
+    data_read = 0;
+    data_write = 0;
+    last_print = millis();
+  }
 }
 
 #ifndef SIMULATE
 void loop() {
-    USBHost.task();
-    if (Serial1.available()) {
-        int inByte = Serial1.read();
-        if (inByte == 'r') {
-          reset_usb_boot(0,0);
-        }
+  USBHost.task();
+  if (Serial1.available()) {
+    int inByte = Serial1.read();
+    if (inByte == 'r') {
+      reset_usb_boot(0, 0);
     }
-    stats();
+  }
+  while (ps2_raw_has_data()) {
+    uint8_t b = ps2_raw_pop();
+    process_ps2_byte(b);
+  }
+  stats();
 }
 #else
 
 void loop() {
-    if (Serial1.available()) {
-        bool shift = false;
-        int inByte = Serial1.read();
-        uint8_t base = ascii2scancode(inByte);
-        if (!base) {
-          if (inByte == ':') {
-            shift = true;
-            data_buf_write(0x2A, false); // press shift
-            base = ascii2scancode(';');
-          }
-        }
-        data_buf_write(base, false);
-        data_buf_write(base | 0x80, false);
-        if (shift) {
-          data_buf_write(0x2A | 0x80, false);
-        }
-        Serial1.printf("Simulated key press: %c (0x%02X)\n", inByte, base);
+  if (Serial1.available()) {
+    bool shift = false;
+    int inByte = Serial1.read();
+    uint8_t base = ascii2scancode(inByte);
+    if (!base) {
+      if (inByte == ':') {
+        shift = true;
+        data_buf_write(0x2A, false); // press shift
+        base = ascii2scancode(';');
+      }
     }
-    stats();
+    data_buf_write(base, false);
+    data_buf_write(base | 0x80, false);
+    if (shift) {
+      data_buf_write(0x2A | 0x80, false);
+    }
+    Serial1.printf("Simulated key press: %c (0x%02X)\n", inByte, base);
+  }
+  while (ps2_raw_has_data()) {
+    uint8_t b = ps2_raw_pop();
+    process_ps2_byte(b);
+  }
+  stats();
 }
 
 #endif
 
 void loop1() {
 
-    uint32_t rxempty_mask = (1u << (PIO_FSTAT_RXEMPTY_LSB + sm_bus));
+  uint32_t rxempty_mask = (1u << (PIO_FSTAT_RXEMPTY_LSB + sm_bus));
 
-    for(;;) {
-      while ((pio_bus->fstat & rxempty_mask) != 0) {}
-      uint32_t data = pio_bus->rxf[sm_bus];
+  for (;;) {
+    while ((pio_bus->fstat & rxempty_mask) != 0) {
+    }
+    uint32_t data = pio_bus->rxf[sm_bus];
 
-      // Format from bus.pio:
-      // ISR = [a2 (1) << 9  | Data (8) << 1 | Flag (1)]
+    // Format from bus.pio:
+    // ISR = [a2 (1) << 9  | Data (8) << 1 | Flag (1)]
 
-      uint8_t value = (data >> 1) & 0xFF;
-      uint8_t a2 = ((data >> 9) & 0x1);
-      bool write = data & 0x1;
-      uint8_t output_data = 0;
+    uint8_t value = (data >> 1) & 0xFF;
+    uint8_t a2 = ((data >> 9) & 0x1);
+    bool write = data & 0x1;
+    uint8_t output_data = 0;
 
-      // if (!write) {
-      //   Serial1.printf("Bus Message: Data: 0x%08X, A2: 0x%05X, Value: 0x%02X write: %d\n", data, a2, value, write);
-      // }
+    // if (!write) {
+    //   Serial1.printf("Bus Message: Data: 0x%08X, A2: 0x%05X, Value: 0x%02X
+    //   write: %d\n", data, a2, value, write);
+    // }
 
-      if (a2) {
-        if (write) {
-          process8042_64h_write(value);
-          write_commands[command_write & 31] = value;
-          command_write++;
-        } else {
-          status_read++;
-        }
+    if (a2) {
+      if (write) {
+        process8042_64h_write(value);
+        write_commands[command_write & 31] = value;
+        command_write++;
       } else {
-        if (write) {
-          process8042_60h_write(value);
-          write_datas[data_write & 31] = value;
-          data_write++;
-        } else {
-          process8042_60h_read();
-          data_read++;
-        }
+        status_read++;
+      }
+    } else {
+      if (write) {
+        process8042_60h_write(value);
+        write_datas[data_write & 31] = value;
+        data_write++;
+      } else {
+        process8042_60h_read();
+        data_read++;
       }
     }
-
+  }
 }
 
 #ifndef SIMULATE
@@ -400,7 +506,6 @@ void tuh_mount_cb(uint8_t daddr) {
 void tuh_umount_cb(uint8_t daddr) {
   Serial1.printf("Device removed, address = %d\r\n", daddr);
 }
-
 
 #define MAX_REPORT 4
 
@@ -414,15 +519,17 @@ static struct {
 
 static void process_kbd_report(hid_keyboard_report_t const *report);
 static void process_mouse_report(hid_mouse_report_t const *report);
-static void process_generic_report(uint8_t dev_addr, uint8_t instance, uint8_t const *report, uint16_t len);
+static void process_generic_report(uint8_t dev_addr, uint8_t instance,
+                                   uint8_t const *report, uint16_t len);
 
-
-void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_report, uint16_t desc_len) {
+void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance,
+                      uint8_t const *desc_report, uint16_t desc_len) {
   if (dev_addr == 0) {
     callback = true;
     return;
   }
-  Serial1.printf("HID device address = %d, instance = %d is mounted\r\n", dev_addr, instance);
+  Serial1.printf("HID device address = %d, instance = %d is mounted\r\n",
+                 dev_addr, instance);
 
   // Interface protocol (hid_interface_protocol_enum_t)
   const char *protocol_str[] = {"None", "Keyboard", "Mouse"};
@@ -437,9 +544,11 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_re
   }
 
   // By default, host stack will use boot protocol on supported interface.
-  // Therefore for this simple example, we only need to parse generic report descriptor (with built-in parser)
+  // Therefore for this simple example, we only need to parse generic report
+  // descriptor (with built-in parser)
   if (itf_protocol == HID_ITF_PROTOCOL_NONE) {
-    hid_info[instance].report_count = tuh_hid_parse_report_descriptor(hid_info[instance].report_info, MAX_REPORT, desc_report, desc_len);
+    hid_info[instance].report_count = tuh_hid_parse_report_descriptor(
+        hid_info[instance].report_info, MAX_REPORT, desc_report, desc_len);
     Serial1.printf("HID has %u reports \r\n", hid_info[instance].report_count);
   }
 
@@ -452,7 +561,8 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_re
 
 // Invoked when device with hid interface is un-mounted
 void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance) {
-  Serial1.printf("HID device address = %d, instance = %d is unmounted\r\n", dev_addr, instance);
+  Serial1.printf("HID device address = %d, instance = %d is unmounted\r\n",
+                 dev_addr, instance);
   if (dev_addr == keyboard_addr) {
     keyboard_addr = 0;
   } else if (dev_addr == mouse_addr) {
@@ -461,22 +571,24 @@ void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance) {
 }
 
 // Invoked when received report from device via interrupt endpoint
-void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *report, uint16_t len) {
+void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance,
+                                uint8_t const *report, uint16_t len) {
   uint8_t const itf_protocol = tuh_hid_interface_protocol(dev_addr, instance);
 
   switch (itf_protocol) {
-    case HID_ITF_PROTOCOL_KEYBOARD:
-      process_kbd_report((hid_keyboard_report_t const *) report);
-      break;
+  case HID_ITF_PROTOCOL_KEYBOARD:
+    process_kbd_report((hid_keyboard_report_t const *)report);
+    break;
 
-    case HID_ITF_PROTOCOL_MOUSE:
-      process_mouse_report((hid_mouse_report_t const *) report);
-      break;
+  case HID_ITF_PROTOCOL_MOUSE:
+    process_mouse_report((hid_mouse_report_t const *)report);
+    break;
 
-    default:
-      // Generic report requires matching ReportID and contents with previous parsed report info
-      process_generic_report(dev_addr, instance, report, len);
-      break;
+  default:
+    // Generic report requires matching ReportID and contents with previous
+    // parsed report info
+    process_generic_report(dev_addr, instance, report, len);
+    break;
   }
 
   // continue to request to receive report
@@ -485,13 +597,13 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
   }
 }
 
-
 //--------------------------------------------------------------------+
 // Keyboard
 //--------------------------------------------------------------------+
 
 // look up new key in previous keys
-static inline bool find_key_in_report(hid_keyboard_report_t const *report, uint8_t keycode) {
+static inline bool find_key_in_report(hid_keyboard_report_t const *report,
+                                      uint8_t keycode) {
   for (uint8_t i = 0; i < 6; i++) {
     if (report->keycode[i] == keycode) {
       return true;
@@ -501,14 +613,16 @@ static inline bool find_key_in_report(hid_keyboard_report_t const *report, uint8
 }
 
 static void send_scancode(uint8_t hid_code, bool make) {
-  if (hid_code >= HID_TO_SCANCODE_TABLE_SIZE) return;
+  if (hid_code >= HID_TO_SCANCODE_TABLE_SIZE)
+    return;
   uint16_t scan = hid_to_scancode[hid_code];
-  if (!scan) return;
-  
+  if (!scan)
+    return;
+
   if (scancode_is_extended(scan)) {
     data_buf_write(0xE0, false);
   }
-  
+
   uint8_t base = scancode_base(scan);
   if (make) {
     data_buf_write(base, false);
@@ -518,20 +632,21 @@ static void send_scancode(uint8_t hid_code, bool make) {
 }
 
 static void process_kbd_report(hid_keyboard_report_t const *report) {
-  static hid_keyboard_report_t prev_report = {0, 0, {0}};// previous report to check key released
+  static hid_keyboard_report_t prev_report = {
+      0, 0, {0}}; // previous report to check key released
 
   // Process modifiers
   uint8_t changed_modifiers = report->modifier ^ prev_report.modifier;
   if (changed_modifiers) {
     for (uint8_t i = 0; i < 8; i++) {
-        if (changed_modifiers & (1 << i)) {
-            // HID modifier codes start at 0xE0
-            if (report->modifier & (1 << i)) {
-                send_scancode(0xE0 + i, true);
-            } else {
-                send_scancode(0xE0 + i, false);
-            }
+      if (changed_modifiers & (1 << i)) {
+        // HID modifier codes start at 0xE0
+        if (report->modifier & (1 << i)) {
+          send_scancode(0xE0 + i, true);
+        } else {
+          send_scancode(0xE0 + i, false);
         }
+      }
     }
   }
 
@@ -564,19 +679,24 @@ static void process_mouse_report(hid_mouse_report_t const *report) {
   // Byte 1: Y ovf, X ovf, Y sign, X sign, 1, M, R, L
   // Byte 2: X
   // Byte 3: Y
-  
+
   uint8_t buttons = 0;
-  if (report->buttons & MOUSE_BUTTON_LEFT) buttons |= 1;
-  if (report->buttons & MOUSE_BUTTON_RIGHT) buttons |= 2;
-  if (report->buttons & MOUSE_BUTTON_MIDDLE) buttons |= 4;
+  if (report->buttons & MOUSE_BUTTON_LEFT)
+    buttons |= 1;
+  if (report->buttons & MOUSE_BUTTON_RIGHT)
+    buttons |= 2;
+  if (report->buttons & MOUSE_BUTTON_MIDDLE)
+    buttons |= 4;
 
   // PS/2 Y is up-positive, HID is down-positive.
   int16_t rx = report->x;
-  int16_t ry = -report->y; 
-  
+  int16_t ry = -report->y;
+
   uint8_t byte1 = 0x08 | (buttons & 0x07);
-  if (rx < 0) byte1 |= 0x10;
-  if (ry < 0) byte1 |= 0x20;
+  if (rx < 0)
+    byte1 |= 0x10;
+  if (ry < 0)
+    byte1 |= 0x20;
   // Overflow handling omitted for simplicity (HID deltas usually fit)
 
   data_buf_write(byte1, true);
@@ -587,9 +707,10 @@ static void process_mouse_report(hid_mouse_report_t const *report) {
 //--------------------------------------------------------------------+
 // Generic Report
 //--------------------------------------------------------------------+
-static void process_generic_report(uint8_t dev_addr, uint8_t instance, uint8_t const *report, uint16_t len) {
-  (void) dev_addr;
-  (void) len;
+static void process_generic_report(uint8_t dev_addr, uint8_t instance,
+                                   uint8_t const *report, uint16_t len) {
+  (void)dev_addr;
+  (void)len;
 
   uint8_t const rpt_count = hid_info[instance].report_count;
   tuh_hid_report_info_t *rpt_info_arr = hid_info[instance].report_info;
@@ -621,23 +742,23 @@ static void process_generic_report(uint8_t dev_addr, uint8_t instance, uint8_t c
 
   if (rpt_info->usage_page == HID_USAGE_PAGE_DESKTOP) {
     switch (rpt_info->usage) {
-      case HID_USAGE_DESKTOP_KEYBOARD:
-        // Assume keyboard follow boot report layout
-        process_kbd_report((hid_keyboard_report_t const *) report);
-        break;
+    case HID_USAGE_DESKTOP_KEYBOARD:
+      // Assume keyboard follow boot report layout
+      process_kbd_report((hid_keyboard_report_t const *)report);
+      break;
 
-      case HID_USAGE_DESKTOP_MOUSE:
-        // Assume mouse follow boot report layout
-        process_mouse_report((hid_mouse_report_t const *) report);
-        break;
+    case HID_USAGE_DESKTOP_MOUSE:
+      // Assume mouse follow boot report layout
+      process_mouse_report((hid_mouse_report_t const *)report);
+      break;
 
-      default:
-        Serial1.printf("report[%u] ", rpt_info->report_id);
-        for (uint8_t i = 0; i < len; i++) {
-          Serial1.printf("%02X ", report[i]);
-        }
-        Serial1.printf("\r\n");
-        break;
+    default:
+      Serial1.printf("report[%u] ", rpt_info->report_id);
+      for (uint8_t i = 0; i < len; i++) {
+        Serial1.printf("%02X ", report[i]);
+      }
+      Serial1.printf("\r\n");
+      break;
     }
   }
 }
