@@ -11,13 +11,14 @@
 - CGA and basic EGA/EGA video output to VGA monitor using a Rapsberry Pi Pico RP2350
 - Glue logic using GAL20V8
 - Poor man's Parallel port using a 74LS377 latch and 74LS245 buffer
+- Test SD card support thru SD.SYS via the parallel port
+- 8253 PIT timer support & PC speaker 
+- PIC 8259A interrupt controller
+- Keyboard emulation & mouse support thru RP2040. Both PS/2 and USB.
+- Video BIOS to support console emulation on the Pico (cursor position, scrolling). Text mode "framebuffer" works already.
 
 ### TODO
-- Test SD card support thru SD.SYS via the parallel port
-- 8253 PIT timer support & PC speaker (either real or emulated) 
-- PIC 8259A interrupt controller (TBD, only if absolutely necessary)
-- Keyboard emulation (via Arduino Nano? or separated pi pico). Then mouse (or serial mouse)
-- Video BIOS to support console emulation on the Pico (cursor position, scrolling). Text mode "framebuffer" works already.
+- Make it stable
 - Run some games!
 
 
