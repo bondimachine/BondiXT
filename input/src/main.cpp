@@ -623,39 +623,48 @@ volatile bool mouse_enabled = false;
 volatile bool selftest_pending = false;
 #define USB_KEYBOARD_GRACE_MS 1000
 
-// Queue of keyboard/mouse bytes waiting behind the output buffer
+// Port 60h is owned by core1 (the bus core): only core1 latches bytes and
+// drives IRQ1/IRQ12. core0 (PS/2, USB) hands device bytes over through a
+// single-producer / single-consumer ring, so no lock is needed. The core1
+// path runs from RAM (__not_in_flash_func): the old BIOS reads the reply to a
+// command about 1 us after writing it, too soon for flash cache misses.
+
 struct KbdBufferItem {
   uint8_t data;
   bool is_mouse;
 };
 
-#define DATA_BUF_SIZE 16
+// core0 -> core1 ring: core0 only writes data_head, core1 only data_tail
+#define DATA_BUF_SIZE 16 // power of two
 KbdBufferItem data_buffer[DATA_BUF_SIZE];
 volatile uint8_t data_head = 0;
 volatile uint8_t data_tail = 0;
-volatile uint8_t data_count = 0;
 
-// The output buffer: the byte the PC reads next from port 60h.
-volatile bool out_full = false;
-volatile bool out_from_queue = false; // a device byte, not a command reply
-KbdBufferItem out_item;
+// core0 -> core1: a reply core0 wants to give (deferred self test), or -1
+volatile int16_t core0_reply = -1;
 
-// core0 (keyboard/mouse/USB) and core1 (bus) both use the queue and the
-// output buffer.
-static spin_lock_t *out_lock = spin_lock_init(spin_lock_claim_unused(true));
+// core1 only: the output buffer, i.e. the byte the PC reads next from 60h
+static bool out_full = false;
+static bool out_from_queue = false; // a device byte, not a command reply
+static KbdBufferItem out_item;
+// a device byte pushed out of the output buffer by a command reply
+static bool has_held = false;
+static KbdBufferItem held_item;
+
+static uint32_t cycles_per_us = 133; // set in setup1()
 
 // Status register for the byte latched in the output buffer:
 // bit 0 = output buffer full, bit 2 = system flag, bit 5 = byte is from aux.
-inline uint8_t status_register(bool full, bool is_mouse) {
+static inline uint8_t status_register(bool full, bool is_mouse) {
   return 0x4 | ((full && is_mouse) << 5) | full;
 }
 
 // Latches the byte the PC reads next from port 60h, and drives IRQ1/IRQ12
 // like an 8042: high while a byte is waiting (and enabled in the command
 // byte). The line drops for a moment between bytes so the edge-triggered
-// PIC sees each one. Call with out_lock held.
-static void latch_output(uint8_t data, bool full, bool is_mouse,
-                         bool from_queue) {
+// PIC sees each one. core1 only.
+static void __not_in_flash_func(latch_output)(uint8_t data, bool full,
+                                              bool is_mouse, bool from_queue) {
   out_full = full;
   out_from_queue = full && from_queue;
   out_item = {data, is_mouse};
@@ -664,7 +673,7 @@ static void latch_output(uint8_t data, bool full, bool is_mouse,
   gpio_put(MOUSE_INTERRUPT_PIN, false);
   pio_sm_put(pio_bus, sm_bus, status_register(full, is_mouse) << 8 | data);
   if (full) {
-    busy_wait_us_32(1);
+    busy_wait_at_least_cycles(cycles_per_us); // ~1 us
     if (is_mouse) {
       gpio_put(MOUSE_INTERRUPT_PIN, (command_byte & 0b10) != 0);
     } else {
@@ -673,37 +682,53 @@ static void latch_output(uint8_t data, bool full, bool is_mouse,
   }
 }
 
-static bool queue_pop(KbdBufferItem &item) {
-  if (data_count == 0)
+// Next device byte for the PC: the one a reply pushed out first. core1 only.
+static bool __not_in_flash_func(next_device_byte)(KbdBufferItem &item) {
+  if (has_held) {
+    has_held = false;
+    item.data = held_item.data; // field by field: no memcpy (flash)
+    item.is_mouse = held_item.is_mouse;
+    return true;
+  }
+  uint8_t tail = data_tail;
+  if (tail == data_head) {
     return false;
-  item = data_buffer[data_tail];
-  data_tail = (data_tail + 1) % DATA_BUF_SIZE;
-  data_count--;
+  }
+  item.data = data_buffer[tail].data;
+  item.is_mouse = data_buffer[tail].is_mouse;
+  __dmb();
+  data_tail = (tail + 1) % DATA_BUF_SIZE;
   return true;
 }
 
-static void queue_push_front(const KbdBufferItem &item) {
-  if (data_count < DATA_BUF_SIZE) {
-    data_tail = (data_tail + DATA_BUF_SIZE - 1) % DATA_BUF_SIZE;
-    data_buffer[data_tail] = item;
-    data_count++;
-  }
-}
-
 // Latches a reply to a command (always "full", 00h included). A device byte
-// that was waiting goes back to the front of the queue instead of being
-// overwritten: it is read after the reply.
-void set_next_60h_byte(uint8_t data, bool is_mouse = false) {
-  uint32_t save = spin_lock_blocking(out_lock);
+// that was waiting is kept and read after the reply. core1 only.
+static void __not_in_flash_func(set_next_60h_byte)(uint8_t data,
+                                                   bool is_mouse = false) {
   if (out_full && out_from_queue) {
-    queue_push_front(out_item);
+    held_item.data = out_item.data;
+    held_item.is_mouse = out_item.is_mouse;
+    has_held = true;
   }
   latch_output(data, true, is_mouse, false);
-  spin_unlock(out_lock, save);
 }
 
-void set_next_60h_read(uint8_t data, bool is_mouse = false) {
+static void __not_in_flash_func(set_next_60h_read)(uint8_t data,
+                                                   bool is_mouse = false) {
   set_next_60h_byte(data, is_mouse);
+}
+
+// core1, while the bus is idle: latch a waiting device byte or core0 reply.
+static void __not_in_flash_func(output_idle_task)() {
+  int16_t reply = core0_reply;
+  if (reply >= 0) {
+    core0_reply = -1;
+    set_next_60h_byte((uint8_t)reply);
+  }
+  KbdBufferItem item;
+  if (!out_full && next_device_byte(item)) {
+    latch_output(item.data, true, item.is_mouse, true);
+  }
 }
 
 void setup() {
@@ -756,13 +781,13 @@ void setup1() {
 
   bus_program_init(pio_bus, sm_bus, offset_bus, 0);
 
+  cycles_per_us = clock_get_hz(clk_sys) / 1000000;
+
   // set the first value of the bus buffer: empty
-  uint32_t save = spin_lock_blocking(out_lock);
   latch_output(0, false, false, false);
-  spin_unlock(out_lock, save);
 }
 
-// A keyboard/mouse byte for the PC (core0).
+// A keyboard/mouse byte for the PC (core0): queued for core1.
 void data_buf_write(uint8_t data, bool is_mouse) {
 
   if (is_mouse && !mouse_enabled) {
@@ -773,18 +798,17 @@ void data_buf_write(uint8_t data, bool is_mouse) {
     return;
   }
 
-  uint32_t save = spin_lock_blocking(out_lock);
-  if (!out_full) {
-    latch_output(data, true, is_mouse, true);
-  } else if (data_count < DATA_BUF_SIZE) {
-    data_buffer[data_head] = {data, is_mouse};
-    data_head = (data_head + 1) % DATA_BUF_SIZE;
-    data_count++;
+  uint8_t head = data_head;
+  uint8_t next = (head + 1) % DATA_BUF_SIZE;
+  if (next == data_tail) {
+    return; // full: drop
   }
-  spin_unlock(out_lock, save);
+  data_buffer[head] = {data, is_mouse};
+  __dmb();
+  data_head = next;
 }
 
-static bool keyboard_present() {
+static bool __not_in_flash_func(keyboard_present)() {
   return keyboard_addr > 0 || ps2_kbd.connected;
 }
 
@@ -799,11 +823,11 @@ static void selftest_task() {
 #endif
   if (keyboard_present() || !detecting) {
     selftest_pending = false;
-    set_next_60h_byte(keyboard_present() ? 0x55 : 0x00);
+    core0_reply = keyboard_present() ? 0x55 : 0x00; // latched by core1
   }
 }
 
-void process8042_64h_write(uint8_t command) {
+void __not_in_flash_func(process8042_64h_write)(uint8_t command) {
 
   switch (command) {
   case 0x20: // read keyboard command byte
@@ -848,21 +872,19 @@ void process8042_64h_write(uint8_t command) {
 }
 
 // The PC read port 60h: latch the next byte, if any (core1).
-void process8042_60h_read() {
-  uint32_t save = spin_lock_blocking(out_lock);
+void __not_in_flash_func(process8042_60h_read)() {
   KbdBufferItem item;
   if (has_after_ack) {
     has_after_ack = false;
     latch_output(after_ack, true, true, false);
-  } else if (queue_pop(item)) {
+  } else if (next_device_byte(item)) {
     latch_output(item.data, true, item.is_mouse, true);
   } else {
     latch_output(0, false, false, false);
   }
-  spin_unlock(out_lock, save);
 }
 
-void process8042_60h_write(uint8_t value) {
+void __not_in_flash_func(process8042_60h_write)(uint8_t value) {
 
   switch (next60h_write) {
   case 0x60:
@@ -974,12 +996,13 @@ void loop() {
   stats();
 }
 
-void loop1() {
+void __not_in_flash_func(loop1)() {
 
   uint32_t rxempty_mask = (1u << (PIO_FSTAT_RXEMPTY_LSB + sm_bus));
 
   for (;;) {
     while ((pio_bus->fstat & rxempty_mask) != 0) {
+      output_idle_task();
     }
     uint32_t data = pio_bus->rxf[sm_bus];
 
