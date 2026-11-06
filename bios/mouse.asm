@@ -172,10 +172,11 @@ irq12_handler:
     mov ax, 0x40
     mov es, ax
 
-    ; read status
+    ; read status: only a byte that is there (bit 0) and from the mouse (bit 5)
     in al, 0x64
-    test al, 0x21
-    jnz .read_mouse_data
+    and al, 0x21
+    cmp al, 0x21
+    je .read_mouse_data
 
     jmp .done
 

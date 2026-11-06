@@ -31,7 +31,7 @@ static const uint16_t bus_program_instructions[] = {
     0x40e1, // 10: in     osr, 1
     0x009a, // 11: jmp    y--, 26
     0xa046, // 12: mov    y, isr
-    0x2029, // 13: wait   0 pin, 9
+    0x203a, // 13: wait   0 pin, 26
     0x8080, // 14: pull   noblock
     0xa027, // 15: mov    x, osr
     0x0072, // 16: jmp    !y, 18

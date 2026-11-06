@@ -41,7 +41,7 @@ wait_for_something:
     ; DT/R is LOW (Read).
     mov y, isr ; y = A2
     
-    wait 0 pin 9; // Wait for /RD to go low
+    wait 0 pin 26 ; Wait for /RD to go low
 
     pull noblock; Read any possible update from for output buffer, or returns current value of x 
     mov x, osr; save update if any.
