@@ -121,6 +121,7 @@ int15_mouse:
     clc
     mov ah, 0
 
+    sti
     retf 2
 
 
@@ -158,7 +159,14 @@ wait_ps2_output:
     ret
 
 irq12_handler:
-    sti
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+    push bp
+    push ds
     push es
 
     mov ax, 0x40
@@ -223,5 +231,13 @@ irq12_handler:
 	out	0x20, al
 
     pop es
-    
+    pop ds
+    pop bp
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+
     iret

@@ -22,6 +22,7 @@ init_video:
 
 
 int10_handler:
+    push ax                 ; caller's AX, restored in .done for functions that return nothing in it
     push bx
     push cx
     push dx
@@ -366,6 +367,31 @@ int10_handler:
     pop cx
     pop bx
 
+    ; Like the IBM BIOS, functions that return nothing in AX leave it
+    ; untouched; programs rely on this (e.g. setting AH=0Eh once before a
+    ; teletype loop). The others (00h, 03h, 0Fh, 12h, 1Ah...) keep their result.
+    push bp
+    mov bp, sp
+    mov bp, [bp+2]          ; caller's AX
+    xchg bp, ax
+    cmp ah, 0x02            ; set cursor position
+    je .restore_ax
+    cmp ah, 0x06            ; scroll up
+    je .restore_ax
+    cmp ah, 0x07            ; scroll down
+    je .restore_ax
+    cmp ah, 0x09            ; write char + attribute
+    je .restore_ax
+    cmp ah, 0x0a            ; write char
+    je .restore_ax
+    cmp ah, 0x0b            ; set palette
+    je .restore_ax
+    cmp ah, 0x0e            ; teletype
+    je .restore_ax
+    xchg bp, ax             ; keep the function's result
+.restore_ax:
+    pop bp
+    add sp, 2               ; drop the saved AX (iret restores the caller's flags)
     iret
 
 calculate_video_offset_es_si:

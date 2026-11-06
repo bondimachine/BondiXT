@@ -186,5 +186,6 @@ int13_handler:
     clc ; just say we are ok!
 
 .done:
+    sti
     retf 2 ; // instead of iret to overwrite flags.
 

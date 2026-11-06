@@ -162,6 +162,7 @@ int16_handler:
 .done:
     pop bx
     pop es
+    sti
     retf 2 ; // instead of iret to overwrite flags.
 
 ; -----------------------------------------------------------------------

@@ -117,8 +117,6 @@ reset_irq:
     mov word [es:si], cs
 
 
-    sti                   ; enable interrupts again
-
 
     mov dx, POST_ADDRESS
     mov al, 0b11000010
@@ -137,6 +135,8 @@ reset_irq:
     out dx, al
 
     call init_timer
+
+    sti                   ; enable interrupts now that the PIC and PIT are set up
 
     mov dx, POST_ADDRESS
     mov al, 0b11000100

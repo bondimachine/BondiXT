@@ -1,3 +1,4 @@
+CPU 8086
 bits 16
 org 0x100
 
@@ -54,11 +55,11 @@ read_ticks:
     ret
 
 print_string:
-    mov ah, 0x0E
 .next_char:
     lodsb
     cmp al, 0
     je .done
+    mov ah, 0x0E            ; INT 10h may not preserve AH
     int 0x10
     jmp .next_char
 .done:
@@ -83,23 +84,22 @@ print_hex16:
     push dx
 
     mov bx, 4
-    mov cx, ax
+    mov dx, ax
 
 .hex_loop:
-    mov dx, cx
-    and dx, 0xF000
-    shr dx, 12
-    cmp dl, 10
+    mov cl, 4
+    rol dx, cl              ; next nibble into the low bits (8086: shift count in CL)
+    mov al, dl
+    and al, 0x0F
+    cmp al, 10
     jl .hex_digit
-    add dl, 'A' - 10
+    add al, 'A' - 10
     jmp .hex_out
 .hex_digit:
-    add dl, '0'
+    add al, '0'
 .hex_out:
     mov ah, 0x0E
-    mov al, dl
     int 0x10
-    shl cx, 4
     dec bx
     jnz .hex_loop
 

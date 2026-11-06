@@ -31,4 +31,4 @@ run14: $(BIN14)
 	qemu-system-i386 -drive file=$(BIN14),format=raw -serial stdio	
 
 runbios: $(BIOSBIN)
-	qemu-system-i386 -bios $(BIOSBIN) -serial stdio -icount 0
+	qemu-system-i386 -M isapc -bios $(BIOSBIN) -serial stdio -icount 0

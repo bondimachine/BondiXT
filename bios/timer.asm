@@ -97,7 +97,7 @@ beep:
 	mov	al, 0xB6		; set PIC channel 2 to mode 3
 	out	0x43, al
 
-	mov	ax, 0x800		; approximately 800 Hz compensating the 1.84 mhz clock instead of 1.19
+	mov	ax, 1491		; 800 Hz: 1193182 Hz PIT clock / 800
 	out	0x42, al		; load divisor's low byte to PIC
 	mov	al, ah
 	out	0x42, al		; load divisor's high byte to PIC

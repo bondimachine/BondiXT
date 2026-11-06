@@ -40,11 +40,11 @@ clean:
 
 # -device isa-debugcon,iobase=0x80,chardev=debug -chardev file,id=debug,path=/dev/stderr
 run: rom
-	$(QEMU) -bios rom.bin -serial stdio -device isa-vga 
+	$(QEMU) -M isapc -bios rom.bin -serial stdio -device isa-vga 
 
 run8k: rom8k
 	$(QEMU) -bios rom8k.bin.extended -serial stdio -device isa-vga 
 
 
 debug: $(BIN).elf
-	$(QEMU) -bios rom.bin -serial stdio -device isa-vga -s -S
+	$(QEMU) -M isapc -bios rom.bin -serial stdio -device isa-vga -s -S
