@@ -4,7 +4,41 @@ DATA_AREA_CURSOR_X EQU 0x50
 DATA_AREA_CURSOR_Y EQU 0x51
 DATA_AREA_VIDEO_CGA_PALETTE equ	66h
 
+%ifdef QEMU
+; Under QEMU there is no BondiXT video card, just a standard VGA. The makefile
+; loads QEMU's VGA BIOS at C000:0000; we run its init (registers + font), keep
+; its INT 10h on INT 6Dh (the usual VGA BIOS alias) and forward to it whatever
+; the real card does through its custom ports.
+VGA_BIOS_INT EQU 0x6d
+
 init_video:
+    push ds
+    mov ax, 0xc000
+    mov ds, ax
+    cmp word [0], 0xaa55
+    pop ds
+    jne .no_vga_bios
+
+    call 0xc000:0x0003
+
+    ; move the VGA BIOS INT 10h to INT 6Dh and put ours back
+    xor ax, ax
+    mov es, ax
+    mov ax, [es:0x10*4]
+    mov [es:VGA_BIOS_INT*4], ax
+    mov ax, [es:0x10*4+2]
+    mov [es:VGA_BIOS_INT*4+2], ax
+    mov word [es:0x10*4], int10_handler
+    mov [es:0x10*4+2], cs
+
+    ; its init doesn't set a mode (SeaBIOS normally does that afterwards)
+    mov ax, 0x0003
+    int VGA_BIOS_INT
+
+.no_vga_bios:
+%else
+init_video:
+%endif
     ; set default video mode to 80x25 color text mode
     mov ax, 0x40
     mov es, ax
@@ -14,11 +48,32 @@ init_video:
     mov byte [es:DATA_AREA_CURSOR_X], 0
     mov byte [es:DATA_AREA_CURSOR_Y], 0
 
+%ifndef QEMU
     mov dx, 0x3D8
     mov al, 0b10001001 ; high res text mode, output enabled, clear screen
     out dx, al
+%endif
 
     ret
+
+%ifdef QEMU
+; In graphics modes the card draws text written to B000; a plain VGA doesn't,
+; so let the VGA BIOS draw it.
+%macro CHAIN_TEXT_IN_GRAPHICS_MODE 0
+    push ax
+    mov ax, 0x40
+    mov es, ax
+    cmp byte [es:DATA_AREA_VIDEO_MODE], 0x03
+    pop ax
+    jbe %%text_mode
+    int VGA_BIOS_INT
+    jmp .done
+%%text_mode:
+%endmacro
+%else
+%macro CHAIN_TEXT_IN_GRAPHICS_MODE 0
+%endmacro
+%endif
 
 
 int10_handler:
@@ -41,7 +96,7 @@ int10_handler:
     cmp ah, 0x6
     je .scroll_up
 
-    cmp ah, 0x6
+    cmp ah, 0x7
     je .scroll_dn
 
     cmp ah, 0x09
@@ -130,7 +185,15 @@ int10_handler:
     jmp .set_save_and_done
 
 .set_save_and_done:
+%ifdef QEMU
+    push ax
+    mov al, ah
+    mov ah, 0x00
+    int VGA_BIOS_INT
+    pop ax
+%else
     out dx, al
+%endif
     mov dx, 0x40
     mov es, dx
     mov byte [es:DATA_AREA_VIDEO_MODE], ah
@@ -226,6 +289,9 @@ int10_handler:
     shl cx, 1
     add ax, cx
     mov cx, ax
+%ifdef QEMU
+    shr cx, 1 ; VGA wants characters, the card wants bytes
+%endif
 
     mov dx, 0x3d4
     mov al, 0x0e
@@ -253,14 +319,21 @@ int10_handler:
     jmp .done
 
 .scroll_up:
+%ifdef QEMU
+.scroll_dn:
+    int VGA_BIOS_INT
+    jmp .done
+%else
     neg al
 
 .scroll_dn:
     mov dx, 0x3df
     out dx, al
     jmp .done
+%endif
 
 .write_character_attribute:
+    CHAIN_TEXT_IN_GRAPHICS_MODE
 
     call calculate_video_offset_es_si
     mov ah, bl
@@ -274,6 +347,7 @@ int10_handler:
     jmp .done
 
 .write_character:
+    CHAIN_TEXT_IN_GRAPHICS_MODE
 
     call calculate_video_offset_es_si
 
@@ -289,6 +363,8 @@ int10_handler:
 .teletype_output:
     ; for debugging
     call serial_putc
+
+    CHAIN_TEXT_IN_GRAPHICS_MODE
 
     ; Handle carriage return (CR, 0x0D)
     cmp al, 0x0D
@@ -328,9 +404,17 @@ int10_handler:
 
     ; Scroll up: set Y to 24 and scroll
     mov byte [es:DATA_AREA_CURSOR_Y], 24
+%ifdef QEMU
+    mov ax, 0x0601 ; scroll whole screen up one line
+    mov bh, 0x07
+    xor cx, cx
+    mov dx, 0x184f
+    int VGA_BIOS_INT
+%else
     mov al, -1
     mov dx, 0x3df
     out dx, al
+%endif
 
 .teletype_update_hw:
     mov dx, word [es:DATA_AREA_CURSOR_X]
@@ -436,18 +520,3 @@ calculate_video_offset_es_si:
     pop ax
 
     ret
-
-; atc80x25:
-;     db 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x14, 0x07, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 0x0c, 0x00, 0x0f, 0x08
-
-; sequ80x25:
-;     db 0x00, 0x03, 0x00, 0x02
-
-; crtc80x25:
-; 	db 0x5f, 0x4f, 0x50, 0x82, 0x55, 0x81, 0xbf, 0x1f, 0x00, 0x4f, 0x0d, 0x0e, 0x00, 0x00, 0x00, 0x00, 0x9c, 0x8e, 0x8f, 0x28, 0x1f, 0x96, 0xb9, 0xa3, 0xff
-
-; grdc80x25:
-;     db 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x0e, 0x0f, 0xff
-
-; hello:
-;     db 0x07, 'B', 0x07, 'o', 0x07, 'n', 0x07, 'd', 0x07, 'i', 0x07, 'V', 0x07, 'G', 0x07, 'A'
