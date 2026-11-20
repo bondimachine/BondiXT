@@ -8,7 +8,7 @@ QEMU_BIN = bios.qemu.bin
 SRCS = $(ASM) serial.asm serial_util.asm video_serial.asm keyboard_serial.asm disk_embedded.asm config.serial.inc video_custom.asm mouse.asm timer.asm
 # isapc: no PAM, so C0000 is plain RAM. No SeaBIOS runs under -bios, so put QEMU's VGA BIOS at C000:0000 ourselves (see video_custom.asm)
 VGABIOS ?= $(firstword $(wildcard $(dir $(shell which $(QEMU)))../share/qemu/vgabios.bin /usr/share/qemu/vgabios.bin /usr/share/seabios/vgabios.bin))
-QEMU_ARGS = -M isapc -bios rom_qemu.bin -serial stdio -device isa-vga -device loader,file=$(VGABIOS),addr=0xc0000,force-raw=on
+QEMU_ARGS = -M isapc -bios rom.qemu.bin -serial stdio -device isa-vga -device loader,file=$(VGABIOS),addr=0xc0000,force-raw=on
 
 all: $(BIN) $(BIN).elf
 
