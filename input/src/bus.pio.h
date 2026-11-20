@@ -22,29 +22,29 @@ static const uint16_t bus_program_instructions[] = {
     0x8080, //  1: pull   noblock
     0xa027, //  2: mov    x, osr
     0x00c1, //  3: jmp    pin, 1
-    0xa0e0, //  4: mov    osr, pins
-    0x606e, //  5: out    null, 14
-    0x40e1, //  6: in     osr, 1
-    0xa046, //  7: mov    y, isr
-    0xa0c3, //  8: mov    isr, null
-    0x6061, //  9: out    null, 1
-    0x40e1, // 10: in     osr, 1
-    0x009a, // 11: jmp    y--, 26
-    0xa046, // 12: mov    y, isr
-    0x203a, // 13: wait   0 pin, 26
-    0x8080, // 14: pull   noblock
-    0xa027, // 15: mov    x, osr
-    0x0072, // 16: jmp    !y, 18
-    0x6068, // 17: out    null, 8
-    0xa007, // 18: mov    pins, osr
-    0xa0eb, // 19: mov    osr, ~null
-    0x6088, // 20: out    pindirs, 8
-    0xa0e3, // 21: mov    osr, null
-    0x20ba, // 22: wait   1 pin, 26
-    0x6088, // 23: out    pindirs, 8
-    0x4069, // 24: in     null, 9
-    0x0000, // 25: jmp    0
-    0x203a, // 26: wait   0 pin, 26
+    0x00c0, //  4: jmp    pin, 0
+    0xa0e0, //  5: mov    osr, pins
+    0x607a, //  6: out    null, 26
+    0x6041, //  7: out    y, 1
+    0x0084, //  8: jmp    y--, 4
+    0xa0e0, //  9: mov    osr, pins
+    0x606e, // 10: out    null, 14
+    0x6041, // 11: out    y, 1
+    0x40e1, // 12: in     osr, 1
+    0x009b, // 13: jmp    y--, 27
+    0xa046, // 14: mov    y, isr
+    0x8080, // 15: pull   noblock
+    0xa027, // 16: mov    x, osr
+    0x0073, // 17: jmp    !y, 19
+    0x6068, // 18: out    null, 8
+    0xa007, // 19: mov    pins, osr
+    0xa0eb, // 20: mov    osr, ~null
+    0x6088, // 21: out    pindirs, 8
+    0xa0e3, // 22: mov    osr, null
+    0x20ba, // 23: wait   1 pin, 26
+    0x6088, // 24: out    pindirs, 8
+    0x4069, // 25: in     null, 9
+    0x0000, // 26: jmp    0
     0x4008, // 27: in     pins, 8
     0xa04b, // 28: mov    y, ~null
     0x4041, // 29: in     y, 1

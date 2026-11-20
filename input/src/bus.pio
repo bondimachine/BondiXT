@@ -24,26 +24,31 @@ wait_for_something:
 
     jmp pin wait_for_something; CS is high, need to keep waiting.
 
+    ; /CS alone does not mean the cycle is ours. During an interrupt
+    ; acknowledge the 8088 drives IO/M high and DT/R low with a garbage
+    ; address, so /CS can go low with no /RD or /WR ever following. If we
+    ; just waited for the strobe we would answer the NEXT unrelated bus
+    ; cycle (e.g. the CPU pushing FLAGS), so give up as soon as /CS goes away.
+strobe:
+    jmp pin restart ; /CS released before /RD or /WR: not our cycle
+    mov osr, pins
+    out NULL, 26
+    out y, 1        ; y = pin 26 (/WR & /RD)
+    jmp y-- strobe  ; still high: keep waiting
+
+    ; /RD or /WR is low and /CS is still ours. Sample DT/R and A2 now.
     mov osr, pins
     out NULL, 14
-    in osr, 1 ; read DT/R
-    mov y, isr ; y = DT/R (0 for Read, 1 for Write)
+    out y, 1  ; y = DT/R (0 for Read, 1 for Write)
+    in osr, 1 ; ISR = A2
 
-
-    mov isr, null
-    out NULL, 1
-    in osr, 1 ; read A2
-
-    ; 3. Check /RD
     jmp y-- write
 
     ; === READ CYCLE ===
-    ; DT/R is LOW (Read).
+    ; DT/R is LOW (Read) and /RD is already low.
     mov y, isr ; y = A2
-    
-    wait 0 pin 26 ; Wait for /RD to go low
 
-    pull noblock; Read any possible update from for output buffer, or returns current value of x 
+    pull noblock; Read any possible update from for output buffer, or returns current value of x
     mov x, osr; save update if any.
     jmp !y read60
 
@@ -72,9 +77,8 @@ read60:
 
 write:
     ; === WRITE CYCLE ===
-    ; /RD was High. Wait for /WR Low.
-    wait 0 pin 26
-    
+    ; /WR is already low.
+
     ; Read Data (AD0-AD7)
     ; ISR already has Address.
     ; ISR: [ (Address << 8) | Data ]
